@@ -89,17 +89,17 @@
              (make-string "Shenpy.globals[c#34;~Ac#34;] = ~A~%" S V)))
 
 (define py-expr2
-  [shen-func-obj] C -> (make-string "[~A, ~A, ~A, shenpy.reg[~A : ~A + ~A]]"
+  [klvm-closure-nargs] _ -> "len(t[3])"
+  [klvm-closure-func] _ -> "t[1]"
+  [klvm-func-obj] C -> (make-string "[~A, ~A, ~A, shenpy.reg[1 : 1 + ~A]]"
                                     "shenpy.type_function"
                                     (esc-obj (pycontext-func C))
                                     (pycontext-nargs C)
-                                    (+ 1 (pycontext-nargs C))
-                                    (+ 1 (pycontext-nargs C))
                                     "shenpy.nargs")
-  [shen-reg N] _ -> (make-string "shenpy.reg[~A]" N)
-  [shen-stack N] _ -> (make-string "shenpy.stack[shenpy.sp + ~A]" (+ N 1))
-  [shen-nargs] _ -> "shenpy.nargs"
-  [shen-null-label] _ -> "None"
+  [klvm-reg N] _ -> (make-string "shenpy.reg[~A]" N)
+  [klvm-stack N] _ -> (make-string "shenpy.stack[shenpy.sp + ~A]" (+ N 1))
+  [klvm-nargs] _ -> "shenpy.nargs"
+  [klvm-null-label] _ -> "None"
   X _ -> X where (number? X)
   X _ -> (esc-obj X))
 
@@ -115,7 +115,7 @@
   X C -> (py-expr2 X C))
 
 (define py-nargs-cond
-  X Y Z C -> 
+  X Y Z C ->
   (let N (pycontext-nargs C)
        S (pyindent 1 (make-string "if shenpy.nargs < ~A:~%" N))
        S (py-exprs 2 X C S)
@@ -146,36 +146,54 @@
               S (cn S (pyindent (+ L 1) (make-string Fmt N)))
            (pyindent L S)))
 
+(define py-pop-closure-args
+  L X C -> (let R (pyindent L (make-string "a = ~A[3]~%" (py-expr2 X C)))
+                R (cn R (pyindent L (make-string
+                                     "for i in range(0, len(a)):~%" R)))
+                L' (+ L 1)
+                R (cn R (pyindent L' (make-string
+                                      "shenpy.reg[i + 1] = a[i]~%")))
+
+             R))
+
+(define py-sum-expr
+  [X] C Acc -> (make-string "~A~A" Acc (py-expr2 X C))
+  [0 | Y] C Acc -> (py-sum-expr Y C Acc)
+  [X | Y] C Acc -> (let Acc (make-string "~A~A + " Acc (py-expr2 X C))
+                     (py-sum-expr Y C Acc)))
+
 (define py-expr1
-  [shen-return] _ -> (make-string "return shenpy.reg[0]~%")
-  [shen-inc-nargs X] C -> (make-string "shenpy.nargs += ~A~%" (py-expr2 X C))
-  [shen-dec-nargs X] C -> (make-string "shenpy.nargs -= ~A~%" (py-expr2 X C))
-  [shen-ensure-stack-size X] _ ->
-  (make-string "shenpy.ensure_stack_size(~A)~%" (py-expr2 X C))
-  [shen-nregs-> X Y] C -> (make-string "shenpy.reg_size(~A + ~A)~%"
-                                       (py-expr2 X C)
-                                       (py-expr2 Y C))
-  [shen-nregs-> N] C -> (make-string "shenpy.reg_size(~A)~%" (py-expr2 N C))
-  [shen-stack-> N X] C -> (let F "shenpy.stack[shenpy.sp + ~A] = ~A~%"
+  [klvm-return] _ -> (make-string "return shenpy.reg[0]~%")
+  [klvm-inc-nargs X] C -> (make-string "shenpy.nargs += ~A~%" (py-expr2 X C))
+  [klvm-dec-nargs X] C -> (make-string "shenpy.nargs -= ~A~%" (py-expr2 X C))
+  [klvm-stack-size X] C -> (make-string "shenpy.stack_size(~A)~%"
+                                        (py-expr2 X C))
+  [klvm-nregs-> X] C -> (make-string "shenpy.reg_size(~A)~%"
+                                     (py-sum-expr X C ""))
+  [klvm-stack-> N X] C -> (let F "shenpy.stack[shenpy.sp + ~A] = ~A~%"
                             (make-string F (+ N 1) (py-expr2 X C)))
-  [shen-reg-> 0 X] C -> (make-string "shenpy.reg[0] = ~A~%"
-                                     (py-expr-label X C))
-  [shen-reg-> N X] C -> (make-string "shenpy.reg[~A] = ~A~%" N (py-expr2 X C))
-  [shen-inc-stack-ptr X] C -> (make-string "shenpy.sp += ~A~%" (py-expr2 X C))
-  [shen-dec-stack-ptr X] C -> (make-string "shenpy.sp -= ~A~%" (py-expr2 X C))
-  [shen-nargs-> X] C -> (make-string "shenpy.nargs = ~A~%"
+  [klvm-closure-> X] C -> (make-string "t = ~A~%" (py-expr2 X C))
+  [klvm-reg-> [0] X] C -> (make-string "shenpy.reg[0] = ~A~%"
+                                       (py-expr-label X C))
+  [klvm-reg-> X Y] C -> (make-string "shenpy.reg[~A] = ~A~%"
+                                     (py-sum-expr X C "")
+                                     (py-expr2 Y C))
+  [klvm-inc-stack-ptr X] C -> (make-string "shenpy.sp += ~A~%" (py-expr2 X C))
+  [klvm-dec-stack-ptr X] C -> (make-string "shenpy.sp -= ~A~%" (py-expr2 X C))
+  [klvm-nargs-> X] C -> (make-string "shenpy.nargs = ~A~%"
                                      (py-expr2 X C))
-  [shen-goto N] C -> (make-string "return ~A~%" (py-label-str N C))
-  [shen-call X] C -> (make-string "return ~A~%" (str-py-from-shen (str X)))
+  [klvm-goto N] C -> (make-string "return ~A~%" (py-label-str N C))
+  [klvm-call X] C -> (make-string "return shenpy.fns[~A]~%" (esc-obj (str X)))
                      where (symbol? X)
-  [shen-call X] C -> (make-string "return ~A~%" (py-expr2 X C))
+  [klvm-call X] C -> (make-string "return ~A~%" (py-expr2 X C))
   X _ -> (error "Broken KLVM (expr: ~A)" X))
 
 (define py-expr
-  _ [shen-nargs-cond X Y Z] C -> (py-nargs-cond X Y Z C)
-  _ [shen-nargs>0 X Y] C -> (py-nargs>0 X Y C)
-  L [shen-push-extra-args [shen-nargs]] C -> (py-push-extra-args L C)
-  L [shen-pop-extra-args [shen-nargs]] C -> (py-pop-extra-args L C)
+  _ [klvm-nargs-cond X Y Z] C -> (py-nargs-cond X Y Z C)
+  _ [klvm-nargs>0 X Y] C -> (py-nargs>0 X Y C)
+  L [klvm-push-extra-args [klvm-nargs]] C -> (py-push-extra-args L C)
+  L [klvm-pop-extra-args [klvm-nargs]] C -> (py-pop-extra-args L C)
+  L [klvm-pop-closure-args F] C -> (py-pop-closure-args L F C)
   L [if If Then Else] C -> (let X (make-string "if ~A:~%" (py-expr2 If C))
                                 S (pyindent L X)
                                 S (cn S (pyindent (+ L 1) (py-expr1 Then C)))
@@ -197,13 +215,17 @@
 
 (define py-labels
   [] _ Acc -> Acc
-  [[[shen-label N] | X] | Y] C Acc -> (let Acc (cn Acc (py-label N X C))
+  [[[klvm-label N] | X] | Y] C Acc -> (let Acc (cn Acc (py-label N X C))
                                         (py-labels Y C Acc)))
 
 (define py-mkfunc
   Name Args Nregs Code -> (let N (length Args)
                                C (mk-pycontext Name N Nregs)
-                            (py-labels Code C "")))
+                               R (py-labels Code C "")
+                            (cn R (make-string
+                                   "~%shenpy.fns[~A] = ~A~%"
+                                   (esc-obj (str Name))
+                                   (str-py-from-shen (str Name))))))
 
 (define py-from-kl-toplevel
   [set X V] _ -> (emit-set 0 X V)
@@ -220,7 +242,7 @@
 (set skip-internals false)
 
 (define py-dump-file
-  Code To -> (let F (open file To out) 
+  Code To -> (let F (open file To out)
                   . (pr (make-string "import shenpy~%~%") F)
                   . (pr Code F)
                   . (close F)
