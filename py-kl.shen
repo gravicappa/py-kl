@@ -88,18 +88,28 @@
                 V (py-from-kl-expr V false C)
              (make-string "Shenpy.globals[c#34;~Ac#34;] = ~A~%" S V)))
 
+(define py-mk-closure
+  Func Nargs Ninit -> (make-string
+                       "[~A, ~A, ~A, shenpy.reg[1 : 1 + ~A], None]"
+                       "shenpy.type_function"
+                       (esc-obj Func)
+                       Nargs
+                       Ninit))
+
 (define py-expr2
   [klvm-closure-nargs] _ -> "len(t[3])"
   [klvm-closure-func] _ -> "t[1]"
-  [klvm-func-obj] C -> (make-string "[~A, ~A, ~A, shenpy.reg[1 : 1 + ~A]]"
-                                    "shenpy.type_function"
-                                    (esc-obj (pycontext-func C))
-                                    (pycontext-nargs C)
-                                    "shenpy.nargs")
+  [klvm-func-obj] C -> (make-string
+                        "[~A, ~A, ~A, shenpy.reg[1 : 1 + ~A], None]"
+                        "shenpy.type_function"
+                        (esc-obj (pycontext-func C))
+                        (pycontext-nargs C)
+                        "shenpy.nargs")
   [klvm-reg N] _ -> (make-string "shenpy.reg[~A]" N)
   [klvm-stack N] _ -> (make-string "shenpy.stack[shenpy.sp + ~A]" (+ N 1))
   [klvm-nargs] _ -> "shenpy.nargs"
   [klvm-null-label] _ -> "None"
+  [klvm-mk-closure Func Nregs Ninit] _ -> (py-mk-closure Func Nregs Ninit)
   X _ -> X where (number? X)
   X _ -> (esc-obj X))
 
@@ -142,7 +152,7 @@
 (define py-pop-extra-args
   L C -> (let N (pycontext-nargs C)
               S (make-string "for x in range(1, 1 + shenpy.nargs):~%")
-              Fmt "shenpy.reg[x + ~A] = shenpy.stack[sp + x + 1]~%"
+              Fmt "shenpy.reg[x + ~A] = shenpy.stack[shenpy.sp + x + 1]~%"
               S (cn S (pyindent (+ L 1) (make-string Fmt N)))
            (pyindent L S)))
 
