@@ -90,7 +90,7 @@
 
 (define py-mk-closure
   Func Nargs Ninit ->
-  (let R (make-string "shenpy.sp + 1 : shenpy.sp + 1 + ~A" Nargs)
+  (let R (make-string "shenpy.sp + 1 : shenpy.sp + 1 + ~A" Ninit)
        T "shenpy.type_function"
     (make-string
      "[~A, ~A, ~A, shenpy.stack[~A], None]" T (esc-obj Func) Nargs R)))
@@ -109,7 +109,10 @@
   [klvm-nargs] _ -> "shenpy.nargs"
   [klvm-null-label] _ -> "None"
   [klvm-mk-closure Func Nregs Ninit] _ -> (py-mk-closure Func Nregs Ninit)
-  [klvm-call-error-handler] _ -> (make-string "shenpy.call_error_handler()")
+
+  [klvm-error-unwind-get-handler] _ ->
+  (make-string "shenpy.error_unwind_get_handler()")
+
   [klvm-current-error] _ -> (make-string "shenpy.error_obj")
   X _ -> X where (number? X)
   X _ -> (esc-obj X))
@@ -194,12 +197,13 @@
   [klvm-nargs-> X] C -> (make-string "shenpy.nargs = ~A~%"
                                      (py-expr2 X C))
   [klvm-goto N] C -> (make-string "return ~A~%" (py-label-str N C))
-  [klvm-call X] C -> (make-string "return shenpy.fns[~A]~%" (esc-obj (str X)))
+  [klvm-call X] _ -> (make-string "return shenpy.fns[~A]~%" (esc-obj (str X)))
                      where (symbol? X)
   [klvm-call X] C -> (make-string "return ~A~%" (py-expr2 X C))
-  [klvm-set-error-handler X] C -> (make-string
-                                   "shenpy.set_error_handler(~A)~%"
+  [klvm-push-error-handler X] C -> (make-string
+                                   "shenpy.push_error_handler(~A)~%"
                                    (py-expr2 X C))
+  [klvm-pop-error-handler] _ -> (make-string "shenpy.pop_error_handler()~%")
   X _ -> (error "Broken KLVM (expr: ~A)" X))
 
 (define py-expr
