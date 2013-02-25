@@ -1,8 +1,40 @@
-(defstruct context
-  (nregs number)
-  (toplevel string)
-  (argname symbol)
-  (varname symbol))
+(package py- [py-from-kl klvm-from-kl defstruct kl-imp-show-code
+              kl-imp-template-func-body
+
+              shenpy- nargs proc this klvm- lbl shenpy_func
+
+              klvm-call
+              klvm-closure->
+              klvm-closure-func
+              klvm-closure-nargs
+              klvm-current-error
+              klvm-dec-nargs
+              klvm-dec-stack-ptr
+              klvm-error-unwind-get-handler
+              klvm-func-obj
+              klvm-goto
+              klvm-inc-nargs
+              klvm-inc-stack-ptr
+              klvm-label
+              klvm-mk-closure
+              klvm-nargs
+              klvm-nargs->
+              klvm-nargs>0
+              klvm-nargs-cond
+              klvm-nregs->
+              klvm-pop-closure-args
+              klvm-pop-error-handler
+              klvm-pop-extra-args
+              klvm-push-error-handler
+              klvm-push-extra-args
+              klvm-reg
+              klvm-reg->
+              klvm-return
+              klvm-stack
+              klvm-stack->
+              klvm-stack-size
+              klvm-thaw
+              ]
 
 (define str-py-from-shen*
   "" Acc -> Acc
@@ -34,24 +66,24 @@
 
 \* renaming all py-reserved keywords, functions, ... *\
 (define str-py-from-shen
-  X -> (cn "$shen$" X)
-       where (element? X ["return" "new" "def" "while" "for"
-                          "if" "do" "in" "print" "eval"
-                          "object" "lambda"])
+  X -> (cn "shen_" X)
+       where (element? X ["return" "def" "while" "for" "if" "else" "in"
+                          "print" "eval" "object" "lambda" "not" "True"
+                          "False" "__init__" "class" "yield" "None" "import"])
   X -> (str-py-from-shen* X ""))
 
 (define sym-py-from-shen
   X -> (intern (str-py-from-shen (str X))))
 
-(set py-backslash (n->string 92))
-(set py-dquote (n->string 34))
+(set backslash (n->string 92))
+(set dquote (n->string 34))
 
 (define esc-string
   "" Acc -> Acc
   (@s C S) Acc -> (let P (value py-backslash)
                     (esc-string S (make-string "~A~A~A" Acc P C)))
-                  where (or (= C (value py-backslash))
-                            (= C (value py-dquote)))
+                  where (or (= C (value backslash))
+                            (= C (value dquote)))
   (@s C S) Acc -> (esc-string S (cn Acc "\x0a"))
                   where (= (string->n C) 10)
   (@s C S) Acc -> (esc-string S (cn Acc "\x0d"))
@@ -59,12 +91,13 @@
   (@s C S) Acc -> (esc-string S (cn Acc C)))
 
 (define func-name
-  X -> X)
+  X -> (sym-py-from-shen (concat klvm- X)))
 
 (define esc-obj
   X -> (make-string "c#34;~Ac#34;" (esc-string X "")) where (string? X)
   X -> (func-name X) where (shen-sysfunc? X)
   X -> (sym-py-from-shen X) where (symbol? X)
+  [proc] -> "proc()" \* for translation template code *\
   X -> (error "Object ~R cannot be escaped" X))
 
 (set *py-indent* "    ")
@@ -80,7 +113,7 @@
 
 (defstruct pycontext
   (func symbol)
-  (nargs number)
+  (nargs A)
   (nregs number))
 
 (define emit-set
@@ -92,8 +125,8 @@
   Func Nargs Ninit ->
   (let R (make-string "shenpy.sp + 1 : shenpy.sp + 1 + ~A" Ninit)
        T "shenpy.type_function"
-    (make-string
-     "[~A, ~A, ~A, shenpy.stack[~A], None]" T (esc-obj Func) Nargs R)))
+       F (func-name Func)
+    (make-string "[~A, ~A, ~A, shenpy.stack[~A], None]" T F Nargs R)))
 
 (define py-expr2
   [klvm-closure-nargs] _ -> "len(t[3])"
@@ -101,7 +134,7 @@
   [klvm-func-obj] C -> (make-string
                         "[~A, ~A, ~A, shenpy.reg[1 : 1 + ~A], None]"
                         "shenpy.type_function"
-                        (esc-obj (pycontext-func C))
+                        (func-name (pycontext-func C))
                         (pycontext-nargs C)
                         "shenpy.nargs")
   [klvm-reg N] _ -> (make-string "shenpy.reg[~A]" N)
@@ -114,17 +147,15 @@
   (make-string "shenpy.error_unwind_get_handler()")
 
   [klvm-current-error] _ -> (make-string "shenpy.error_obj")
+  [klvm-native X] _ -> X
   X _ -> X where (number? X)
   X _ -> (esc-obj X))
 
 (define py-label-sym
-  X C -> (concat shen-lbl (concat X (concat - (pycontext-func C)))))
-
-(define py-label-str
-  X C -> (str-py-from-shen (str (py-label-sym X C))))
+  X C -> (concat lbl (concat X (concat - (pycontext-func C)))))
 
 (define py-expr-label
-  N C -> (py-label-str N C) where (number? N)
+  N C -> (func-name (py-label-sym N C)) where (number? N)
   X _ -> (esc-obj X) where (symbol? X)
   X C -> (py-expr2 X C))
 
@@ -178,6 +209,7 @@
 
 (define py-expr1
   [klvm-return] _ -> (make-string "return shenpy.reg[0]~%")
+  [klvm-dec-nargs nargs] C -> (make-string "shenpy.nargs -= nargs~%")
   [klvm-inc-nargs X] C -> (make-string "shenpy.nargs += ~A~%" (py-expr2 X C))
   [klvm-dec-nargs X] C -> (make-string "shenpy.nargs -= ~A~%" (py-expr2 X C))
   [klvm-stack-size X] C -> (make-string "shenpy.stack_size(~A)~%"
@@ -196,7 +228,8 @@
   [klvm-dec-stack-ptr X] C -> (make-string "shenpy.sp -= ~A~%" (py-expr2 X C))
   [klvm-nargs-> X] C -> (make-string "shenpy.nargs = ~A~%"
                                      (py-expr2 X C))
-  [klvm-goto N] C -> (make-string "return ~A~%" (py-label-str N C))
+  [klvm-goto N] C -> (make-string "return ~A~%"
+                                  (func-name (py-label-sym N C)))
   [klvm-call X] _ -> (make-string "return shenpy.fns[~A]~%" (esc-obj (str X)))
                      where (symbol? X)
   [klvm-call X] C -> (make-string "return ~A~%" (py-expr2 X C))
@@ -204,7 +237,7 @@
                                    "shenpy.push_error_handler(~A)~%"
                                    (py-expr2 X C))
   [klvm-pop-error-handler] _ -> (make-string "shenpy.pop_error_handler()~%")
-  X _ -> (error "Broken KLVM (expr: ~A)" X))
+  X C -> (error "Broken KLVM in ~A (expr: ~A)" (pycontext-func C) X))
 
 (define py-expr
   _ [klvm-nargs-cond X Y Z] C -> (py-nargs-cond X Y Z C)
@@ -225,43 +258,54 @@
   L [X | Y] C Acc -> (py-exprs L Y C (cn Acc (py-expr L X C))))
 
 (define py-func-hdr
-  Name -> (make-string "~%def ~A():~%" (str-py-from-shen (str Name))))
+  Name -> (make-string "def ~A():~%" (func-name Name)))
 
 (define py-label
   0 Code C -> (cn (py-func-hdr (pycontext-func C)) (py-exprs 1 Code C ""))
   N Code C -> (cn (py-func-hdr (py-label-sym N C)) (py-exprs 1 Code C "")))
 
+(define template-label
+  [[[klvm-label 0] | X]] C -> (py-exprs 1 X C ""))
+
+(define template
+  -> (let C (mk-pycontext this nargs 0)
+          Name "mkfun"
+          X (template-label (kl-imp-template-func-body nargs proc) C)
+          Fmt "def ~A(~A, nargs, proc):~%~A~%shenpy.mkfun = ~A~%~%"
+       (make-string Fmt Name (pycontext-func C) X Name)))
+
 (define py-labels
   [] _ Acc -> Acc
-  [[[klvm-label N] | X] | Y] C Acc -> (let Acc (cn Acc (py-label N X C))
+  [[[klvm-label N] | X] | Y] C Acc -> (let Acc (make-string "~A~A~%"
+                                                            Acc
+                                                            (py-label N X C))
                                         (py-labels Y C Acc)))
 
 (define py-mkfunc
-  Name Args Nregs Code -> (let N (length Args)
-                               C (mk-pycontext Name N Nregs)
+  Name Args Nregs Code -> (let C (mk-pycontext Name (length Args) Nregs)
                                R (py-labels Code C "")
-                            (cn R (make-string
-                                   "~%shenpy.fns[~A] = ~A~%"
-                                   (esc-obj (str Name))
-                                   (str-py-from-shen (str Name))))))
+                            (cn R (make-string "shenpy.fns[~A] = ~A~%~%"
+                                               (esc-obj (str Name))
+                                               (func-name Name)))))
 
 (define py-from-kl-toplevel
-  [set X V] _ -> (emit-set 0 X V)
-  [shen-mk-func Name Args Nregs Code] _ -> (py-mkfunc Name Args Nregs Code)
-  X _ -> "")
+  [shen-mk-func Name Args Nregs Code] -> (py-mkfunc Name Args Nregs Code)
+  [X] -> (make-string "~A()" X)
+  X -> "")
 
 (define py-from-kl-aux
   [] Acc -> Acc
-  [X | Y] Acc -> (py-from-kl-aux Y (cn Acc (py-from-kl-toplevel X _))))
+  [X | Y] Acc -> (py-from-kl-aux Y (cn Acc (py-from-kl-toplevel X))))
 
 (define py-from-kl
-  X -> (py-from-kl-aux X ""))
+  X -> (py-from-kl-aux (klvm-from-kl (function primitives) X) ""))
 
 (set skip-internals false)
 
-(define py-dump-file
+(define dump-file
   Code To -> (let F (open file To out)
                   . (pr (make-string "import shenpy~%~%") F)
                   . (pr Code F)
                   . (close F)
                true))
+)
