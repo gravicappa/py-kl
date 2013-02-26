@@ -272,7 +272,7 @@
           Name "mkfun"
           X (template-label (kl-imp-template-func-body nargs proc) C)
           Fmt "def ~A(~A, nargs, proc):~%~A~%shenpy.mkfun = ~A~%~%"
-       (make-string Fmt Name (pycontext-func C) X Name)))
+       (make-string Fmt Name (func-name (pycontext-func C)) X Name)))
 
 (define py-labels
   [] _ Acc -> Acc
