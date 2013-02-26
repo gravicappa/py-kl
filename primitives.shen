@@ -54,16 +54,12 @@
   F [hd X] -> (make-string "~A[1]" (parg F X))
   F [tl X] -> (make-string "~A[2]" (parg F X))
   F [value X] -> (make-string "shenpy.globals[~A]" (parg F X))
-  F [set X Y] -> (make-string
-                "shenpy.globals[~A] = ~A" (parg F X) (parg F Y))
+  F [set X Y] -> (mkprim F "setval" [X Y])
   F [vector X] -> (let X (parg F X)
                   (make-string "([~A] + [None] * ~A)" X X))
   F [absvector X] -> (make-string "([None] * ~A)" (parg F X))
   F [<-address V X] -> (make-string "~A[~A]" (parg F V) (parg F X))
-  F [address-> V X Y] -> (make-string "~A[~A] = ~A"
-                                    (parg F V)
-                                    (parg F X)
-                                    (parg F Y))
+  F [address-> V I X] -> (mkprim F "absvector_set" [V I X])
 
   F [open X Y Z] -> (mkprim F "open" [X Y Z])
   F [pr X Y] -> (mkprim F "pr" [X Y])
