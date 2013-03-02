@@ -18,7 +18,7 @@
   N [[_ | A] | Rest] Acc -> (count-int-funcs-aux N Rest Acc))
 
 (define parg
-  F X -> (py-expr2 (hd (F X)) _))
+  F X -> (py-expr2 (F X) _))
 
 (define mkargs
   F [X] Acc -> (make-string "~A~A" Acc (parg F X))
@@ -30,8 +30,9 @@
 
 (define primitives-aux
   F [klvm-internal] -> "proc()"
-  F [= X X] -> "True"
-  F [= X Y] -> "False" where (or (and (number? X) (number? Y))
+  _ [] -> "[]"
+  _ [= X X] -> "True"
+  _ [= X Y] -> "False" where (or (and (number? X) (number? Y))
                                  (and (string? X) (string? Y)))
   F [= X Y] -> (mkprim F "isequal" [X Y])
   F [string? X] -> (make-string "isinstance(~A, str)" (parg F X))
@@ -92,9 +93,6 @@
 (define generate-prim
   X Args -> (py-from-kl [[defun X Args [X | Args]]]))
 
-(define gen-prim-func
-  X -> [X])
-
 (define gen-prim-args
   N N Acc -> (reverse Acc)
   I N Acc -> (gen-prim-args (+ I 1) N [[klvm-reg (+ I 1)] | Acc]))
@@ -104,7 +102,7 @@
                  S (make-string "def ~A():~%" Name)
                  Nargs (length Args)
                  Args' (gen-prim-args 0 Nargs [])
-                 Code (primitives-aux (function gen-prim-func) [X | Args'])
+                 Code (primitives-aux (/. X X) [X | Args'])
                  Fmt "return shenpy.mkfun(~A, ~A, lambda: ~A)~%~%"
                  S (cn S (pyindent 1 (make-string Fmt Name Nargs Code)))
                  X' (esc-obj (str X))
