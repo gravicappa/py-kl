@@ -1,7 +1,10 @@
-(package py- [py-from-kl klvm-from-kl defstruct kl-imp-show-code
+(package py- [py-from-kl klvm-from-kl defstruct py-dump
               kl-imp-template-func-body
+              register-dumper kl-from-shen
+              kl-imp-show-code
+              backend-write-file
 
-              shenpy- nargs proc this klvm- lbl shenpy_func
+              shenpy- nargs proc this klvm- lbl shenpy_func all python
 
               klvm-call
               klvm-closure->
@@ -80,7 +83,7 @@
 
 (define esc-string
   "" Acc -> Acc
-  (@s C S) Acc -> (let P (value py-backslash)
+  (@s C S) Acc -> (let P (value backslash)
                     (esc-string S (make-string "~A~A~A" Acc P C)))
                   where (or (= C (value backslash))
                             (= C (value dquote)))
@@ -98,7 +101,7 @@
   X -> (func-name X) where (shen-sysfunc? X)
   X -> (sym-py-from-shen X) where (symbol? X)
   [proc] -> "proc()" \* for translation template code *\
-  X -> (error "Object ~R cannot be escaped" X))
+  X -> (error "Object ~S cannot be escaped" X))
 
 (set *py-indent* "    ")
 
@@ -149,6 +152,7 @@
   [klvm-current-error] _ -> (make-string "shenpy.error_obj")
   [klvm-native X] _ -> X
   X _ -> X where (number? X)
+  [] _ -> "[]"
   X _ -> (esc-obj X))
 
 (define py-label-sym
@@ -237,7 +241,8 @@
                                    "shenpy.push_error_handler(~A)~%"
                                    (py-expr2 X C))
   [klvm-pop-error-handler] _ -> (make-string "shenpy.pop_error_handler()~%")
-  X C -> (error "Broken KLVM in ~A (expr: ~A)" (pycontext-func C) X))
+  [klvm-native X] _ -> (make-string "~A~%" X)
+  X C -> (error "Broken KLVM in ~S (expr: ~S)" (pycontext-func C) X))
 
 (define py-expr
   _ [klvm-nargs-cond X Y Z] C -> (py-nargs-cond X Y Z C)
@@ -302,10 +307,25 @@
 
 (set skip-internals false)
 
-(define dump-file
-  Code To -> (let F (open file To out)
-                  . (pr (make-string "import shenpy~%~%") F)
-                  . (pr Code F)
-                  . (close F)
-               true))
+(define dump-to-file
+  Code To -> (backend-write-file (make-string "import shenpy~%~A~%" Code) To))
+
+(define py-dump
+  Srcdir F Dstdir -> (let D (make-string "~A~A.py" Dstdir F)
+                          S (make-string "~A~A" Srcdir F)
+                          Kl (map (function kl-from-shen) (read-file S))
+                          _ (if (= (value shen-*hush*) hushed)
+                                _
+                                (output "== ~A -> ~A~%" S D))
+                       (dump-to-file (py-from-kl Kl) D)))
+
+(declare py-dump [string --> [string --> [string --> boolean]]])
+(declare dump-to-file [string --> [string --> boolean]])
+
+\* Register function py-dump as a dumper in Modulesys for all implementations
+   of python language. Do nothing if Modulesys is not loaded *\
+
+(if (trap-error (do (register-dumper) true) (/. _ false))
+    (register-dumper python all py-dump)
+    _)
 )
