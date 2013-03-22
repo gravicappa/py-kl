@@ -2,9 +2,11 @@
               kl-imp-template-func-body
               register-dumper kl-from-shen
               kl-imp-show-code
-              backend-write-file
+              backend-utils-translate-to-file
+              backend-utils-write-file
 
               shenpy- nargs proc this klvm- lbl shenpy_func all python
+              func_nargs
 
               klvm-call
               klvm-closure->
@@ -149,9 +151,15 @@
   [klvm-error-unwind-get-handler] _ ->
   (make-string "shenpy.error_unwind_get_handler()")
 
-  [klvm-current-error] _ -> (make-string "shenpy.error_obj")
+  [klvm-current-error] _ -> "shenpy.error_obj"
   [klvm-native X] _ -> X
+  [fail] _ -> "shenpy.type_fail"
+  true _ -> "True"
+  false _ -> "False"
   X _ -> X where (number? X)
+  X _ -> (make-string "~A" (esc-obj X)) where (string? X)
+  X _ -> (make-string "[shenpy.type_symbol, ~A]" (esc-obj (str X)))
+         where (symbol? X)
   [] _ -> "[]"
   X _ -> (esc-obj X))
 
@@ -211,6 +219,14 @@
   [X | Y] C Acc -> (let Acc (make-string "~A~A + " Acc (py-expr2 X C))
                      (py-sum-expr Y C Acc)))
 
+(define py-expr-closure
+  L X C -> (let L1 (pyindent L (make-string "t = ~A~%" (py-expr2 X C)))
+                L2 (pyindent L (make-string "if shenpy.issymbol(t):~%"))
+                L3 (pyindent (+ L 1) (make-string "t = fns[t[1]]~%"))
+             (cn L1 (cn L2 L3)))
+  L X C -> (pyindent L (make-string "t = ~A~%" (py-expr2 X C)))
+           where (symbol? X))
+
 (define py-expr1
   [klvm-return] _ -> (make-string "return shenpy.reg[0]~%")
   [klvm-dec-nargs nargs] C -> (make-string "shenpy.nargs -= nargs~%")
@@ -222,7 +238,6 @@
                                      (py-sum-expr X C ""))
   [klvm-stack-> N X] C -> (let F "shenpy.stack[shenpy.sp + ~A] = ~A~%"
                             (make-string F (+ N 1) (py-expr2 X C)))
-  [klvm-closure-> X] C -> (make-string "t = ~A~%" (py-expr2 X C))
   [klvm-reg-> [0] X] C -> (make-string "shenpy.reg[0] = ~A~%"
                                        (py-expr-label X C))
   [klvm-reg-> X Y] C -> (make-string "shenpy.reg[~A] = ~A~%"
@@ -256,6 +271,7 @@
                                 S (cn S (pyindent L (make-string "else:~%")))
                                 S (cn S (pyindent (+ L 1) (py-expr1 Else C)))
                              S)
+  L [klvm-closure-> X] C -> (py-expr-closure L X C)
   L X C -> (pyindent L (py-expr1 X C)))
 
 (define py-exprs
@@ -273,10 +289,11 @@
   [[[klvm-label 0] | X]] C -> (py-exprs 1 X C ""))
 
 (define template
-  -> (let C (mk-pycontext this nargs 0)
+  -> (let C (mk-pycontext this func_nargs 0)
           Name "mkfun"
-          X (template-label (kl-imp-template-func-body nargs proc) C)
-          Fmt "def ~A(~A, nargs, proc):~%~A~%shenpy.mkfun = ~A~%~%"
+          T (kl-imp-template-func-body [klvm-native func_nargs] proc)
+          X (template-label T C)
+          Fmt "def ~A(~A, func_nargs, proc):~%~A~%shenpy.mkfun = ~A~%~%"
        (make-string Fmt Name (func-name (pycontext-func C)) X Name)))
 
 (define py-labels
@@ -294,9 +311,12 @@
                                                (func-name Name)))))
 
 (define py-from-kl-toplevel
+  X <- (do (output "KL: ~S~%" X) (fail))
+  X <- (do (kl-imp-show-code [X]) (fail))
   [shen-mk-func Name Args Nregs Code] -> (py-mkfunc Name Args Nregs Code)
-  [X] -> (make-string "~A()" X)
-  X -> "")
+  [klvm-nargs-> [0]] -> (make-string "shenpy.nargs = 0~%")
+  [klvm-call X] -> (make-string "shenpy.call(~A)~%~%" (func-name X))
+  _ -> "")
 
 (define py-from-kl-aux
   [] Acc -> Acc
@@ -308,16 +328,25 @@
 (set skip-internals false)
 
 (define dump-to-file
-  Code To -> (backend-write-file (make-string "import shenpy~%~A~%" Code) To))
+  Code To -> (backend-utils-write-file
+              (make-string "import shenpy~%~A~%" Code) To))
+
+(define py-dump'
+  X -> (py-from-kl [X]))
 
 (define py-dump
   Srcdir F Dstdir -> (let D (make-string "~A~A.py" Dstdir F)
                           S (make-string "~A~A" Srcdir F)
-                          Kl (map (function kl-from-shen) (read-file S))
-                          _ (if (= (value shen-*hush*) hushed)
+                          X (read-file S)
+                          . (if (= (value shen-*hush*) hushed)
                                 _
                                 (output "== ~A -> ~A~%" S D))
-                       (dump-to-file (py-from-kl Kl) D)))
+                       (backend-utils-translate-to-file
+                        (/. F (pr (make-string "import shenpy~%~%") F))
+                        py-dump'
+                        (/. F _)
+                        X
+                        D)))
 
 (declare py-dump [string --> [string --> [string --> boolean]]])
 (declare dump-to-file [string --> [string --> boolean]])
