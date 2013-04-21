@@ -1,4 +1,4 @@
-(package py- [py-from-kl shenpy- klvm-runtime klvm-reg shenpy-eval]
+(package py [py-from-kl shenpy- klvm-runtime klvm-reg shenpy-eval]
 
 (set int-funcs [[[X] | [hd tl not string? number? symbol? cons?
                         vector? absvector? value intern vector
@@ -6,7 +6,7 @@
                         string->n empty? get-time error simple-error
                         error-to-string]]
                 [[X Y] | [+ - * / = > >= < <= cons set <-address
-                         cn pos @p]]
+                         cn pos @p pr]]
                 [[X Y Z] | [address-> open]]])
 
 (define count-int-funcs-aux
@@ -18,15 +18,15 @@
   N [[_ | A] | Rest] Acc -> (count-int-funcs-aux N Rest Acc))
 
 (define parg
-  F X -> (py-expr2 (F X) _))
+  F X -> (expr2 (F X) _))
 
 (define mkargs
-  F [X] Acc -> (make-string "~A~A" Acc (parg F X))
-  F [X | Y] Acc -> (let Acc (make-string "~A~A, " Acc (parg F X))
+  F [X] Acc -> (cn Acc (parg F X))
+  F [X | Y] Acc -> (let Acc (@s Acc (parg F X) ", ")
                      (mkargs F Y Acc)))
 
 (define mkprim
-  F Name Args -> (make-string "shenpy.~A(~A)" Name (mkargs F Args "")))
+  F Name Args -> (s [(id Name) "(" (mkargs F Args "") ")"]))
 
 (define primitives-aux
   F [klvm-internal] -> "proc()"
@@ -38,30 +38,31 @@
   F [= X Y] -> (mkprim F "isequal" [X Y])
   F [string? X] -> (make-string "isinstance(~A, str)" (parg F X))
   F [number? X] -> (let X (parg F X)
-                      Fmt "(isinstance(~A, int) or isinstance(~A, float))"
-                   (make-string Fmt X X))
+                     (s ["((isinstance(" X ", int) "
+                         "or isinstance(" X ", float)) "
+                         "and not isinstance(" X ", bool))"]))
   F [symbol? X] -> (mkprim F "issymbol" [X])
   F [cons? X] -> (mkprim F "iscons" [X])
   F [vector? X] -> (mkprim F "isvector" [X])
   F [absvector? X] -> (mkprim F "isabsvector" [X])
   F [empty? X] -> (make-string "(~A == [])" (parg F X))
 
-  F [str X] -> (mkprim F "str" [X])
+  F [str X] -> (mkprim F "tostring" [X])
   F [tlstr X] -> (make-string "~A[1:]" (parg F X))
   F [n->string X] -> (make-string "chr(~A)" (parg F X))
   F [string->n X] -> (make-string "ord(~A)" (parg F X))
 
   F [not X] -> (make-string "(not ~A)" (parg F X))
-  F [intern X] -> (make-string "[shenpy.type_symbol, ~A]" (parg F X))
+  F [intern X] -> (s ["[" (id "type_symbol") ", " (parg F X) "]"])
   F [hd X] -> (make-string "~A[1]" (parg F X))
   F [tl X] -> (make-string "~A[2]" (parg F X))
-  _ [value X] -> (make-string "shenpy.globals[~A]" (esc-obj (str X)))
+  _ [value X] -> (s [(id "vars") "[" (esc-obj (str X)) "]"])
                  where (symbol? X)
-  F [value X] -> (make-string "shenpy.globals[~A[1]]" (parg F X))
+  F [value X] -> (s [(id "vars") "[" (parg F X) "[1]]"])
   F [set X Y] -> (mkprim F "setval" [X Y])
   F [vector X] -> (let X (parg F X)
-                    (make-string "([~A] + [shenpy.fail_obj] * ~A)" X X))
-  F [absvector X] -> (make-string "([shenpy.fail_obj] * ~A)" (parg F X))
+                    (s ["([" X "] + [" (id "fail_obj") "] * " X ")"]))
+  F [absvector X] -> (s ["([" (id "fail_obj") "] * " (parg F X) ")"])
   F [<-address V X] -> (make-string "~A[~A]" (parg F V) (parg F X))
   F [address-> V I X] -> (mkprim F "absvector_set" [V I X])
 
@@ -76,14 +77,14 @@
 
   F [cn X Y] -> (make-string "(~A + ~A)" (parg F X) (parg F Y))
   F [pos X Y] -> (make-string "~A[~A]" (parg F X) (parg F Y))
-  F [@p X Y] -> (make-string
-                 "[shenpy.fns['shen-tuple'], ~A, ~A]" (parg F X) (parg F Y))
-  F [cons X Y] -> (make-string
-                   "[shenpy.type_cons, ~A, ~A]" (parg F X) (parg F Y))
+  F [@p X Y] -> (s ["[" (id "fns") "['shen.tuple'], " (parg F X) ", "
+                    (parg F Y) "]"])
+  F [cons X Y] -> (s ["[" (id "type_cons") ", " (parg F X) ", " (parg F Y)
+                      "]"])
   F [Op X Y] -> (make-string "(~A ~A ~A)" (parg F X) Op (parg F Y))
                 where (element? Op [+ - * / > < >= <=])
-  F [shenpy-eval X] -> (mkprim F "eval_code" [X])
-  F [fail] -> "shenpy.fail_obj"
+  F [pr X Y] -> (mkprim F "write_string" [X Y])
+  F [fail] -> (id "fail_obj")
   _ _ -> (fail))
 
 (define primitives
@@ -101,19 +102,21 @@
 
 (define generate-prim
   X Args -> (let Name (sym-py-from-shen (concat shenpy- X))
-                 S (make-string "def ~A():~%" Name)
+                 S (make-string "def ~A():~%~A" Name (func-prelude))
                  Nargs (length Args)
                  Args' (gen-prim-args 0 Nargs [])
                  Code (primitives-aux (/. X X) [X | Args'])
-                 Fmt "return shenpy.mkfun(~A, ~A, lambda: ~A)~%~%"
-                 S (cn S (pyindent 1 (make-string Fmt Name Nargs Code)))
+                 Y (s ["return " (id "mkfun") "(" Name ", " Nargs
+                       ", lambda:" Code ")" (endl) (endl)])
+                 S (cn S (indent 1 Y))
                  X' (esc-obj (str X))
-              (cn S (make-string "shenpy.fns[~A] = ~A~%~%" X' Name))))
+              (cn S (s [(id' "defun_x") "(" X' ", " Nargs ", " Name ")"
+                        (endl) (endl)]))))
 
 (define generate-primitives-n
   _ [] Acc -> Acc
   Args [X | R] Acc -> (let S (generate-prim X Args)
-                           Acc (make-string "~A~A" Acc S)
+                           Acc (cn Acc S)
                         (generate-primitives-n Args R Acc)))
 
 (define generate-primitives-aux
