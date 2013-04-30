@@ -3,11 +3,11 @@
 (set int-funcs [[[X] | [hd tl not string? number? symbol? cons?
                         vector? absvector? value intern vector
                         read-byte close absvector str tlstr n->string
-                        string->n empty? get-time error simple-error
+                        string->n empty? error simple-error
                         error-to-string]]
                 [[X Y] | [+ - * / = > >= < <= cons set <-address
                          cn pos @p pr]]
-                [[X Y Z] | [address-> open]]])
+                [[X Y Z] | [address->]]])
 
 (define count-int-funcs-aux
   _ [] Acc -> Acc
@@ -22,7 +22,7 @@
 
 (define mkargs
   F [X] Acc -> (cn Acc (parg F X))
-  F [X | Y] Acc -> (let Acc (@s Acc (parg F X) ", ")
+  F [X | Y] Acc -> (let Acc (s [Acc (parg F X) ", "])
                      (mkargs F Y Acc)))
 
 (define mkprim
@@ -66,11 +66,9 @@
   F [<-address V X] -> (make-string "~A[~A]" (parg F V) (parg F X))
   F [address-> V I X] -> (mkprim F "absvector_set" [V I X])
 
-  F [open X Y Z] -> (mkprim F "open" [X Y Z])
   F [read-byte X] -> (mkprim F "read_byte" [X])
-  F [close X] -> (mkprim F "close" [X])
+  F [close X] -> (s [(parg F X) ".close()"])
 
-  F [get-time X] -> (mkprim F "get_time" [X])
   F [error X] -> (mkprim F "error" [X])
   F [simple-error X] -> (mkprim F "error" [X])
   F [error-to-string X] -> (mkprim F "error_to_string" [X])
@@ -93,25 +91,23 @@
                (fail)
                [klvm-native X'])))
 
-(define generate-prim
-  X Args -> (py-from-kl [[defun X Args [X | Args]]]))
-
 (define gen-prim-args
   N N Acc -> (reverse Acc)
   I N Acc -> (gen-prim-args (+ I 1) N [[klvm-reg (+ I 1)] | Acc]))
 
 (define generate-prim
   X Args -> (let Name (sym-py-from-shen (concat shenpy- X))
-                 S (make-string "def ~A():~%~A" Name (func-prelude))
+                 C (mk-context Name 0 0 0)
+                 S (s ["def " Name "():" (endl+ 1 C) (func-prelude C)])
                  Nargs (length Args)
                  Args' (gen-prim-args 0 Nargs [])
                  Code (primitives-aux (/. X X) [X | Args'])
-                 Y (s ["return " (id "mkfun") "(" Name ", " Nargs
-                       ", lambda:" Code ")" (endl) (endl)])
-                 S (cn S (indent 1 Y))
+                 S (s [S (indent C) "return " (id "mkfun") "(" Name ", " Nargs
+                       ", lambda: " Code ")" (endl) (endl)])
                  X' (esc-obj (str X))
-              (cn S (s [(id' "defun_x") "(" X' ", " Nargs ", " Name ")"
-                        (endl) (endl)]))))
+                 . (indent-decr 1 C)
+              (s [S (id' "defun_x") "(" X' ", " Nargs ", " Name ")" (endl)
+                  (endl)])))
 
 (define generate-primitives-n
   _ [] Acc -> Acc

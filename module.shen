@@ -1,5 +1,5 @@
 (register-module [[name: py-kl]
-                  [depends: reg-kl backend-utils]
+                  [depends: klvm backend-utils]
                   [author: "Ramil Farkhshatov"]
                   [license: "GPLv3+"]
                   [desc: "Python shen translator."]
