@@ -20,6 +20,7 @@
              klvm-error-unwind-get-handler
              klvm-func-obj
              klvm-goto
+             klvm-if
              klvm-inc-nargs
              klvm-inc-stack-ptr
              klvm-label
@@ -319,7 +320,7 @@
   [klvm-pop-extra-args [klvm-nargs]] C -> (pop-extra-args C)
 \\!!!  [klvm-put-closure-args F] C -> (put-closure-args F C)
   [klvm-put-closure-args] C -> (put-closure-args [] C)
-  [if If Then Else] C -> (expr-if If Then Else C)
+  [klvm-if If Then Else] C -> (expr-if If Then Else C)
   [klvm-closure-> X] C -> (expr-closure X C)
   X C -> (error "Broken KLVM in ~S (expr: ~S)" (context-func C) X))
 
