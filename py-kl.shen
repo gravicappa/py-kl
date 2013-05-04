@@ -29,7 +29,7 @@
              klvm-nargs>0
              klvm-nargs-cond
              klvm-nregs->
-             klvm-pop-closure-args
+             klvm-put-closure-args
              klvm-pop-error-handler
              klvm-pop-extra-args
              klvm-push-error-handler
@@ -245,14 +245,14 @@
                   "[" (id "sp") " + x + 1]" (endl- 1 C)])
          S))
 
-(define pop-closure-args'
+(define put-closure-args'
   X C -> (let R (s [(indent C) "a = " X "[3]" (endl)])
               R (s [R (indent C) "for i in xrange(0, len(a)):" (endl+ 1 C)])
            (s [R (indent C) (id "reg") "[i + 1] = a[i]" (endl- 1 C)])))
 
-(define pop-closure-args
-  [] C -> (pop-closure-args' "t" C)
-  X C -> (pop-closure-args' (expr2 X C) C))
+(define put-closure-args
+  [] C -> (put-closure-args' "t" C)
+  X C -> (put-closure-args' (expr2 X C) C))
 
 (define sum-expr
   [X] C Acc -> (cn Acc (expr2 X C))
@@ -317,8 +317,8 @@
   [klvm-nargs>0 X Y] C -> (nargs>0 X Y C)
   [klvm-push-extra-args [klvm-nargs]] C -> (push-extra-args C)
   [klvm-pop-extra-args [klvm-nargs]] C -> (pop-extra-args C)
-  [klvm-pop-closure-args F] C -> (pop-closure-args F C)
-  [klvm-pop-closure-args] C -> (pop-closure-args [] C)
+\\!!!  [klvm-put-closure-args F] C -> (put-closure-args F C)
+  [klvm-put-closure-args] C -> (put-closure-args [] C)
   [if If Then Else] C -> (expr-if If Then Else C)
   [klvm-closure-> X] C -> (expr-closure X C)
   X C -> (error "Broken KLVM in ~S (expr: ~S)" (context-func C) X))
