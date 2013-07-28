@@ -6,7 +6,7 @@
                         string->n empty? error simple-error
                         error-to-string]]
                 [[X Y] | [+ - * / = > >= < <= cons set <-address
-                         cn pos @p pr]]
+                         cn pos @p write-byte]]
                 [[X Y Z] | [address->]]])
 
 (define count-int-funcs-aux
@@ -67,6 +67,7 @@
   F [address-> V I X] -> (mkprim F "absvector_set" [V I X])
 
   F [read-byte X] -> (mkprim F "read_byte" [X])
+  F [write-byte X Y] -> (mkprim F "write_byte" [X Y])
   F [close X] -> (s [(parg F X) ".close()"])
 
   F [error X] -> (mkprim F "error" [X])
@@ -97,7 +98,7 @@
 
 (define generate-prim
   X Args -> (let Name (sym-py-from-shen (concat shenpy- X))
-                 C (mk-context Name 0 0 0)
+                 C (mk-context Name 0 0 0 "")
                  S (s ["def " Name "():" (endl+ 1 C) (func-prelude C)])
                  Nargs (length Args)
                  Args' (gen-prim-args 0 Nargs [])

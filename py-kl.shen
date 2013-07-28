@@ -1,7 +1,7 @@
 (package py [py-from-kl klvm-from-kl defstruct py.dump
-             kl-imp-template-func-body
+             klvm-template-func-body
              register-dumper kl-from-shen
-             kl-imp-show-code
+             klvm-show-code
              backend-utils.map-shen
              backend-utils.translate-to-file
              backend-utils.write-file
@@ -51,7 +51,8 @@
   (func symbol)
   (nargs A)
   (nregs number)
-  (indent 0))
+  (indent 0)
+  (toplevel string))
 
 (define s*
   [X] Acc -> (cn Acc X) where (string? X)
@@ -189,7 +190,6 @@
   [klvm-reg N] _ -> (s [(id "reg") "[" N "]"])
   [klvm-stack N] _ -> (s [(id "stack") "[" (id "sp") " + " (+ N 1) "]"])
   [klvm-nargs] _ -> (id "nargs")
-  [klvm-null-label] _ -> "None"
   [klvm-mk-closure Func Nregs Ninit] _ -> (mk-closure Func Nregs Ninit)
   [klvm-error-unwind-get-handler] _ -> (s [(id "error_unwind_get_handler")
                                            "()"])
@@ -280,9 +280,9 @@
 
 (define expr1
   [klvm-return] C -> (s [(indent C) "return " (id "reg") "[0]" (endl)])
-  [klvm-dec-nargs nargs] C -> (s [(indent C) (id "nargs") " -= nargs" (endl)])
   [klvm-inc-nargs X] C -> (s [(indent C) (id "nargs") " += " (expr2 X C)
                               (endl)])
+  [klvm-dec-nargs nargs] C -> (s [(indent C) (id "nargs") " -= nargs" (endl)])
   [klvm-dec-nargs X] C -> (s [(indent C) (id "nargs") " -= " (expr2 X C)
                               (endl)])
   [klvm-stack-size X] C -> (s [(indent C) (id "stack_size") "(" (expr2 X C)
@@ -316,8 +316,8 @@
   [klvm-native X] C -> (s [(indent C) X (endl)])
   [klvm-nargs-cond X Y Z] C -> (nargs-cond X Y Z C)
   [klvm-nargs>0 X Y] C -> (nargs>0 X Y C)
-  [klvm-push-extra-args [klvm-nargs]] C -> (push-extra-args C)
-  [klvm-pop-extra-args [klvm-nargs]] C -> (pop-extra-args C)
+  [klvm-push-extra-args] C -> (push-extra-args C)
+  [klvm-pop-extra-args] C -> (pop-extra-args C)
 \\!!!  [klvm-put-closure-args F] C -> (put-closure-args F C)
   [klvm-put-closure-args] C -> (put-closure-args [] C)
   [klvm-if If Then Else] C -> (expr-if If Then Else C)
@@ -356,9 +356,9 @@
   [[[klvm-label 0] | X]] C -> (exprs X C ""))
 
 (define template
-  -> (let C (mk-context this func_nargs 0 0)
+  -> (let C (mk-context this func_nargs 0 0 "")
           Name "mkfun"
-          T (kl-imp-template-func-body [klvm-native "func_nargs"] proc)
+          T (klvm-template-func-body [klvm-native "func_nargs"] proc)
        (s ["def " Name "(" (func-name (context-func C)) ", func_nargs, proc):"
            (endl+ 1 C) (func-prelude C) (template-label T C) (endl)
            (id "mkfun") " = " Name (endl) (endl)])))
@@ -370,7 +370,7 @@
 
 (define mkfunc
   Name Args Nregs Code -> (let Nargs (length Args)
-                               C (mk-context Name Nargs Nregs 0)
+                               C (mk-context Name Nargs Nregs 0 "")
                                R (labels Code C "")
                                . (indent-decr 1 C)
                             R))
@@ -397,7 +397,7 @@
 
 (define py-from-kl-toplevel
   X <- (do (output "KL: ~S~%" X) (fail)) where false
-  X <- (do (kl-imp-show-code [X]) (fail)) where false
+  X <- (do (klvm-show-code [X]) (fail)) where false
   [klvm-closure Name Args Nregs Code] -> (mkfunc Name Args Nregs Code)
   [klvm-func Name Args Nregs Code] -> (cn (mkfunc Name Args Nregs Code)
                                           (def-func Name Args))
