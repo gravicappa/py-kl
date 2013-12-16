@@ -28,9 +28,15 @@
 (define mkprim
   F Name Args -> (s [(id Name) "(" (mkargs F Args "") ")"]))
 
+(define mkintern
+  _ "true" -> "True"
+  _ "false" -> "False"
+  _ X -> (s ["(" (id "type_symbol") ", " (esc-obj (str X)) ")"])
+         where (string? X)
+  F X -> (mkprim F "intern" [X]))
+
 (define primitives-aux
-  F [klvm-internal] -> "proc()"
-  _ [] -> "[]"
+  _ [] -> "()"
 
   _ [= X X] -> "True"
   _ [= X Y] -> "False" where (or (and (number? X) (number? Y))
@@ -39,13 +45,14 @@
   F [string? X] -> (make-string "isinstance(~A, str)" (parg F X))
   F [number? X] -> (let X (parg F X)
                      (s ["((isinstance(" X ", int) "
+                         "or isinstance(" X ", long) "
                          "or isinstance(" X ", float)) "
                          "and not isinstance(" X ", bool))"]))
   F [symbol? X] -> (mkprim F "issymbol" [X])
   F [cons? X] -> (mkprim F "iscons" [X])
   F [vector? X] -> (mkprim F "isvector" [X])
   F [absvector? X] -> (mkprim F "isabsvector" [X])
-  F [empty? X] -> (make-string "(~A == [])" (parg F X))
+  F [empty? X] -> (make-string "(~A == ())" (parg F X))
 
   F [str X] -> (mkprim F "tostring" [X])
   F [tlstr X] -> (make-string "~A[1:]" (parg F X))
@@ -53,7 +60,7 @@
   F [string->n X] -> (make-string "ord(~A)" (parg F X))
 
   F [not X] -> (make-string "(not ~A)" (parg F X))
-  F [intern X] -> (s ["[" (id "type_symbol") ", " (parg F X) "]"])
+  F [intern X] -> (mkintern F X)
   F [hd X] -> (make-string "~A[1]" (parg F X))
   F [tl X] -> (make-string "~A[2]" (parg F X))
   _ [value X] -> (s [(id "globvars") "[" (esc-obj (str X)) "]"])
@@ -78,8 +85,9 @@
   F [pos X Y] -> (make-string "~A[~A]" (parg F X) (parg F Y))
   F [@p X Y] -> (s ["[" (id "fns") "['shen.tuple'], " (parg F X) ", "
                     (parg F Y) "]"])
-  F [cons X Y] -> (s ["[" (id "type_cons") ", " (parg F X) ", " (parg F Y)
-                      "]"])
+  F [cons X Y] -> (s ["(" (id "type_cons") ", " (parg F X) ", " (parg F Y)
+                      ")"])
+  F [/ X Y] -> (make-string "(1.0 * ~A / ~A)" (parg F X) (parg F Y))
   F [Op X Y] -> (make-string "(~A ~A ~A)" (parg F X) Op (parg F Y))
                 where (element? Op [+ - * / > < >= <=])
   F [pr X Y] -> (mkprim F "write_string" [X Y])
@@ -94,18 +102,23 @@
 
 (define gen-prim-args
   N N Acc -> (reverse Acc)
-  I N Acc -> (gen-prim-args (+ I 1) N [[klvm-reg (+ I 1)] | Acc]))
+  I N Acc -> (gen-prim-args (+ I 1) N [[klvm-reg I] | Acc]))
 
 (define generate-prim
   X Args -> (let Name (sym-py-from-shen (concat shenpy- X))
-                 C (mk-context Name 0 0 0 "")
-                 S (s ["def " Name "():" (endl+ 1 C) (func-prelude C)])
+                 X' (esc-obj (str X))
+                 C (mk-context Name 0 0 0 "" (value *inline*))
+                 S (s ["def " Name "():" (endl+ 1 C)])
+                 S (s [S (indent C) "shen_reg = reg" (endl)])
+                 S (s [S (indent C) "shen_sp = sp" (endl)])
                  Nargs (length Args)
+                 S (s [S (indent C) "x = fn_entry(" Name ", " Nargs ", " X'
+                         ")" (endl)
+                         (indent C) "if x != fail_obj: return x" (endl)])
                  Args' (gen-prim-args 0 Nargs [])
                  Code (primitives-aux (/. X X) [X | Args'])
-                 S (s [S (indent C) "return " (id "mkfun") "(" Name ", " Nargs
-                       ", lambda: " Code ")" (endl) (endl)])
-                 X' (esc-obj (str X))
+                 S (s [S (indent C) "return fn_return(" Code ", "
+                       (id "next") ")" (endl) (endl)])
                  . (indent-decr 1 C)
               (s [S (id' "defun_x") "(" X' ", " Nargs ", " Name ")" (endl)
                   (endl)])))
@@ -122,8 +135,7 @@
                                 (generate-primitives-aux R Acc)))
 
 (define generate-primitives
-  -> (let S (template)
+  -> (let S (s [(entry-tpl) (endl) (return-tpl)])
           S (generate-primitives-aux (value int-funcs) S)
        (cn S (py-from-kl (klvm-runtime)))))
-
 )
