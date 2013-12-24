@@ -56,6 +56,7 @@
   (toplevel string)
   (inline (list symbol)))
 
+\* Can contain entry, return items *\
 (set *inline* [entry return])
 
 (define s'
@@ -187,7 +188,7 @@
 (define func-obj
   Func Nargs C -> (s ["(" (id "type_function") ", "
                       (func-name Func) ", " (native Nargs) ", "
-                      (id "reg") "[" (id "sp") " : "
+                      "" (id "reg") "[" (id "sp") " : "
                       (id "sp") " + " (id "nargs") "], "
                       (func-name-str (context-func C)) ")"]))
 
@@ -238,8 +239,10 @@
                         Name (esc-obj (str (context-func C)))
                      (s [(indent C) "x = " (id "fn_entry")
                          "("  Func ", " Nargs ", " Name ")" (endl)
-                         (indent C) "if x != (id "fail_obj") : return x"
-                         (endl) (func-prelude C)])))
+                         (indent C) "if x != " (id "fail_obj") ": return x"
+                         (endl) 
+                         \*(func-prelude C)*\
+                         ])))
 
 (define nargs>0'
   X Y C -> (let S (s [(indent C) "if " (id "nargs") " == 0:" (endl+ 1 C)])
@@ -260,7 +263,7 @@
 (define put-closure-args
   Off C -> (let R (s [(indent C) "a = t[3]" (endl)])
                 R (s [R (indent C) "i = " (id "nargs") (endl)])
-                R (s [R (indent C) "for x in reversed(a):" (endl+ 1 C)])
+                R (s [R (indent C) "for x in a:" (endl+ 1 C)])
                 R (s [R (indent C) (id "reg") "[" (id "sp") " + " Off
                         " + i] = x" (endl)])
            (s [R (indent C) "i += 1" (endl- 1 C)])))

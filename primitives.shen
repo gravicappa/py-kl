@@ -31,7 +31,7 @@
 (define mkintern
   _ "true" -> "True"
   _ "false" -> "False"
-  _ X -> (s ["(" (id "type_symbol") ", " (esc-obj (str X)) ")"])
+  _ X -> (s ["(" (id "type_symbol") ", " (esc-obj X) ")"])
          where (string? X)
   F X -> (mkprim F "intern" [X]))
 
