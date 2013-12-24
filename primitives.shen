@@ -6,7 +6,7 @@
                         string->n empty? error simple-error
                         error-to-string]]
                 [[X Y] | [+ - * / = > >= < <= cons set <-address
-                         cn pos @p write-byte]]
+                         cn pos @p write-byte or and]]
                 [[X Y Z] | [address->]]])
 
 (define count-int-funcs-aux
