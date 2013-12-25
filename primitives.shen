@@ -89,7 +89,7 @@
                       ")"])
   F [/ X Y] -> (make-string "(1.0 * ~A / ~A)" (parg F X) (parg F Y))
   F [Op X Y] -> (make-string "(~A ~A ~A)" (parg F X) Op (parg F Y))
-                where (element? Op [+ - * / > < >= <=])
+                where (element? Op [+ - * / > < >= <= and or])
   F [pr X Y] -> (mkprim F "write_string" [X Y])
   F [fail] -> (id "fail_obj")
   _ _ -> (fail))
