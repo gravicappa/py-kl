@@ -1,52 +1,26 @@
-(package py [py-from-kl klvm-from-kl defstruct py.dump
-             klvm-func-entry-tpl
-             klvm-func-return-tpl
+(package py [py-from-kl klvm.s2-from-kl defstruct py.dump
              register-dumper kl-from-shen
-             klvm-show-code
+
+             klvm.dbg.show-code klvm.entry-template klvm.return-template
+             klvm.native klvm.lambda
+              
+             klvm.call klvm.closure klvm.closure-> klvm.closure-nargs
+             klvm.entry klvm.func klvm.func-obj klvm.goto klvm.goto-next
+             klvm.if klvm.if-nargs>0 klvm.labels klvm.nargs klvm.nargs-
+             klvm.nargs-> klvm.nargs-cond klvm.next klvm.next->
+             klvm.nregs-> klvm.pop-error-handler klvm.push-error-handler
+             klvm.put-closure-args klvm.reg klvm.reg-> klvm.ret
+             klvm.ret-> klvm.return klvm.s2.runtime klvm.sp+ klvm.sp-
+             klvm.tailcall klvm.tailif klvm.thaw klvm.toplevel
+             klvm.wipe-stack
+
              backend-utils.map-shen
              backend-utils.translate-to-file
              backend-utils.write-file
              backend-utils.with-file-output
-
+             
              shenpy- nargs proc this klvm- lbl shenpy_func all python
-             func_nargs
-
-             klvm-call
-             klvm-closure->
-             klvm-closure-func
-             klvm-closure-nargs
-             klvm-current-error
-             klvm-inc-nargs
-             klvm-dec-nargs
-             klvm-inc-stack-ptr
-             klvm-dec-stack-ptr
-             klvm-save-stack-ptr
-             klvm-restore-stack-ptr
-             klvm-wipe-stack
-             klvm-error-unwind-get-handler
-             klvm-func-obj
-             klvm-func-ptr
-             klvm-goto
-             klvm-if
-             klvm-label
-             klvm-mk-closure
-             klvm-next
-             klvm-next->
-             klvm-nargs
-             klvm-nargs->
-             klvm-if-nargs>0
-             klvm-nargs-cond
-             klvm-nregs->
-             klvm-put-closure-args
-             klvm-pop-error-handler
-             klvm-push-error-handler
-             klvm-reg
-             klvm-reg->
-             klvm-return
-             klvm-thaw
-             klvm-closure
-             klvm-func
-             klvm-toplevel]
+             func_nargs]
 
 (defstruct context
   (func symbol)
@@ -57,9 +31,10 @@
   (inline (list symbol)))
 
 \* Can contain entry, return items *\
-(set *inline* [entry return])
+(set inline [])
 
 (define s'
+  [] Acc -> Acc
   [X] Acc -> (cn Acc X) where (string? X)
   [X] Acc -> (cn Acc (str X))
   [X | Y] Acc -> (s' Y (cn Acc X)) where (string? X)
@@ -68,30 +43,29 @@
 (define s
   X -> (s' X ""))
 
-(define indent'
-  0 S -> S
-  Level S -> (let X "    "
-               (indent' (- Level 1) (cn X S))))
-
-(define indent
-  Level -> (indent' Level "") where (number? Level)
-  C -> (indent' (context-indent C) ""))
-
-(define ls
-  X C -> (cn (indent C) (s X)))
-
 (define endl -> "c#10;")
 
-(define endl+
-  X C -> (do (context-indent-> C (+ X (context-indent C)))
-             (endl)))
+(define py-indent
+  S 0 -> S
+  S I -> (py-indent (cn S "    ") (- I 1)))
 
-(define indent-decr
-  X C -> (context-indent-> C (- (context-indent C) X)))
+(define py-expr
+  X I S true -> (cn (py-expr X I S false) (endl))
+  X I S false -> (cn (py-indent S I) (s X)))
 
-(define endl-
-  X C -> (do (indent-decr X C)
-             (endl)))
+(define py'
+  [] I S -> S
+  [[--> | X] | Y] I S -> (py' Y I (py' X (+ I 1) S))
+  [[X | Xs] | Y] I S -> (py' Y I (py-expr [X | Xs] I S true))
+  [[] | Y] I S -> (py' Y I (py-expr [] I S true))
+  [X | Y] I S -> (py' Y I (py-expr [X] 0 S false)))
+
+(define py
+  I X -> (py' X I "") where (number? I)
+  C X -> (py' X (context-indent C) "") where (context? C))
+
+(define @
+  X Acc -> (append (reverse X) Acc))
 
 (define str-py-from-shen*
   "" Acc -> Acc
@@ -142,12 +116,12 @@
                   where (= (string->n C) 13)
   (@s C S) Acc -> (esc-string S (cn Acc C)))
 
-(set *same-namespace* false)
-(set *in-repl* true)
+(set same-namespace false)
+(set in-repl true)
 
 (define id'
   X -> (id' (str X)) where (symbol? X)
-  X -> (cn "shen." X) where (not (value *same-namespace*))
+  X -> (cn "shen." X) where (not (value same-namespace))
   X -> X)
 
 (define id
@@ -158,16 +132,16 @@
   X -> (id' X))
 
 (define func-name-str
-  [klvm-native X] -> X where (symbol? X)
-  [klvm-native X] -> (intern X) where (string? X)
+  [klvm.native X] -> X where (symbol? X)
+  [klvm.native X] -> (intern X) where (string? X)
   X -> (esc-obj (str (sym-py-from-shen (concat klvm- X)))))
 
 (define func-name
-  [klvm-native X] -> X
+  [klvm.native X] -> X
   X -> (sym-py-from-shen (concat klvm- X)))
 
 (define native
-  [klvm-native X] -> X
+  [klvm.native X] -> X
   X -> X)
 
 (define esc-obj
@@ -180,34 +154,46 @@
   true -> "True"
   false -> "False"
   X -> (esc-obj X) where (string? X)
-  X -> (s ["(" (id "type_symbol") ", " (esc-obj (str X)) ")"])
-       where (symbol? X)
+  X -> (s [(id "intern") "(" (esc-obj (str X)) ")"]) where (symbol? X)
   [] -> "()"
   X -> (esc-obj X))
 
+(define ensure-str
+  [klvm.native X] -> X
+  X -> (esc-obj X) where (string? X)
+  X -> (esc-obj (str X)) where (symbol? X))
+
+(define func-obj'
+  Func Nargs Name Fn -> (s ["(" (id "type_function") ", "
+                            (ensure-str Name) ", "
+                            (func-name Func) ", "
+                            (native Nargs) ", "
+                            "" (Fn "reg") "[" (Fn "sp") " : "
+                            (Fn "sp") " + " (Fn "nargs") "])"]))
+
+(define closure-obj
+  Func Nargs -> (s ["(" (id "type_function") ", None, " (func-name Func) ", "
+                    (native Nargs) ", [])"]))
+
+(define closure-name
+  Name -> (intern (cn (str Name) "_obj")))
+
 (define func-obj
-  Func Nargs C -> (s ["(" (id "type_function") ", "
-                      (func-name Func) ", " (native Nargs) ", "
-                      "" (id "reg") "[" (id "sp") " : "
-                      (id "sp") " + " (id "nargs") "], "
-                      (func-name-str (context-func C)) ")"]))
+  Func Nargs Name -> (func-obj' Func Nargs Name id))
 
 (define expr2
-  [klvm-closure-nargs] _ -> "len(t[3])"
-  [klvm-closure-func] _ -> "t[1]"
-  [klvm-func-obj Func Nargs] C -> (func-obj Func Nargs C)
-  [klvm-reg 0] _ -> (s [(id "reg") "[" (id "sp") "]"])
-  [klvm-reg N] _ -> (s [(id "reg") "[" (id "sp") " + " N "]"])
-  [klvm-nargs] _ -> (id "nargs")
-  [klvm-next] _ -> (id "next")
-  [klvm-error-unwind-get-handler] _ -> (s [(id "error_unwind_get_handler")
-                                           "()"])
-  [klvm-current-error] _ -> (id "error_obj")
-  [klvm-native X] _ -> X
-  [klvm-func-ptr X] _ -> (func-name X)
-  [fail] _ -> (id "fail_obj")
-  [X | Y] _ -> (error "Unexpected L2 expression ~S" [X | Y])
-  X _ -> (expr-obj X))
+  [klvm.closure-nargs] -> "len(closure[4])"
+  [klvm.func-obj Func Nargs Name] -> (func-obj Func Nargs Name)
+  [klvm.reg 0] -> (s [(id "reg") "[" (id "sp") "]"])
+  [klvm.reg N] -> (s [(id "reg") "[" (id "sp") " + " N "]"])
+  [klvm.nargs] -> (id "nargs")
+  [klvm.next] -> (id "next")
+  [klvm.ret] -> (id "ret")
+  [klvm.native X] -> X
+  [klvm.lambda X] -> (esc-obj (closure-name X))
+  [fail] -> (id "fail_obj")
+  [X | Y] -> (error "Unexpected L2 expression ~S" [X | Y])
+  X -> (expr-obj X))
 
 (define label-sym
   0 C -> (context-func C)
@@ -216,254 +202,224 @@
 (define expr-label
   N C -> (func-name (label-sym N C)) where (number? N)
   X _ -> (esc-obj X) where (symbol? X)
-  X C -> (expr2 X C))
+  X C -> (expr2 X))
 
-(define nargs-cond'
-  Nargs X Y Z C ->
-  (let Nargs (native Nargs)
-       S (s [(indent C) "if " (id "nargs") " == " Nargs ":" (endl+ 1 C)])
-       S (exprs Y C S)
-       . (indent-decr 1 C)
-       S (s [S (indent C) "elif " (id "nargs") " < " Nargs ":" (endl+ 1 C)])
-       S (exprs X C S)
-       . (indent-decr 1 C)
-       S (s [S (indent C) "else:" (endl+ 1 C)])
-       S (exprs Z C S)
-       . (indent-decr 1 C)
-    S))
+(define sum-expr2'
+  [X] Acc -> (cn Acc (expr2 X))
+  [0 | Xs] Acc -> (sum-expr2' Xs Acc)
+  [X | Xs] Acc -> (let Acc (make-string "~A~A + " Acc (expr2 X))
+                    (sum-expr2' Xs Acc))
+  X Acc -> (cn Acc (expr2 X)))
 
-(define nargs-cond
-  Nargs X Y Z C -> (nargs-cond' Nargs X Y Z C)
-                   where (element? entry (context-inline C))
-  Nargs _ _ _ C -> (let Func (func-name (context-func C))
-                        Name (esc-obj (str (context-func C)))
-                     (s [(indent C) "x = " (id "fn_entry")
-                         "("  Func ", " Nargs ", " Name ")" (endl)
-                         (indent C) "if x != " (id "fail_obj") ": return x"
-                         (endl) 
-                         \*(func-prelude C)*\
-                         ])))
-
-(define nargs>0'
-  X Y C -> (let S (s [(indent C) "if " (id "nargs") " == 0:" (endl+ 1 C)])
-                S (exprs Y C S)
-                . (indent-decr 1 C)
-                S (s [S (indent C) "else:" (endl+ 1 C)])
-                S (exprs X C S)
-                . (indent-decr 1 C)
-             S))
-
-(define nargs>0
-  _ _ X Y C -> (nargs>0' X Y C) where (element? return (context-inline C))
-  R N _ _ C -> (let N (expr2 N C)
-                    R (expr2 R C)
-                 (s [(indent C)
-                     "return " (id "fn_return") "(" R ", " N ")" (endl)])))
-
-(define put-closure-args
-  Off C -> (let R (s [(indent C) "a = t[3]" (endl)])
-                R (s [R (indent C) "i = " (id "nargs") (endl)])
-                R (s [R (indent C) "for x in a:" (endl+ 1 C)])
-                R (s [R (indent C) (id "reg") "[" (id "sp") " + " Off
-                        " + i] = x" (endl)])
-           (s [R (indent C) "i += 1" (endl- 1 C)])))
-
-(define sum-expr
-  [X] C Acc -> (cn Acc (expr2 X C))
-  [0 | Y] C Acc -> (sum-expr Y C Acc)
-  [X | Y] C Acc -> (let Acc (make-string "~A~A + " Acc (expr2 X C))
-                     (sum-expr Y C Acc))
-  X C Acc -> (cn Acc (expr2 X C)))
-
-(define expr-closure
-  X C -> (s [(indent C) "t = " (id "fns") "[" (esc-obj (str X)) "]" (endl)])
-         where (symbol? X)
-  X C -> (let R (s [(indent C) "t = " (expr2 X C) (endl)])
-              R (s [R (indent C) "if " (id "issymbol") "(t):" (endl+ 1 C)])
-              R (s [R (indent C) "t = " (id "fns") "[t[1]]" (endl- 1 C)])
-           R))
+(define sum-expr2
+  X -> (sum-expr2' X ""))
 
 (define expr-if
-  If Then Else C -> (let S (s [(indent C) "if " (expr2 If C) ":" (endl+ 1 C)])
-                         S (cn S (expr1 Then C))
-                         . (indent-decr 1 C)
-                         S (s [S (indent C) "else:" (endl+ 1 C)])
-                         S (cn S (expr1 Else C))
-                         . (indent-decr 1 C)
-                      S))
+  If Then Else C Acc -> (@ [["if " (expr2 If) ":"]
+                            [--> | (expr1 Then C [])]
+                            ["else:"]
+                            [--> | (expr1 Else C [])]]
+                           Acc))
 
-(define expr-wipe-stack
-  From C -> (s [(indent C) (id "wipe_stack") "(" From ")" (endl)]))
+(define unwind-protect
+  Thunk Restore -> (trap-error (let R (thaw Thunk)
+                                    . (thaw Restore)
+                                 R)
+                               (/. E (do (thaw Restore)
+                                         (error (error-to-string E))))))
 
-(define expr1
-  [klvm-return X] C -> (s [(indent C) "return " (expr2 X C) (endl)])
-  [klvm-inc-nargs X] C -> (s [(indent C) (id "nargs") " += " (expr2 X C)
-                              (endl)])
-  [klvm-dec-nargs nargs] C -> (s [(indent C) (id "nargs") " -= nargs" (endl)])
-  [klvm-dec-nargs X] C -> (s [(indent C) (id "nargs") " -= " (expr2 X C)
-                              (endl)])
-  [klvm-stack-size X] C -> (s [(indent C) (id "stack_size") "(" (expr2 X C)
-                               ")" (endl)])
-  [klvm-nregs-> X] C -> (s [(indent C) (id "reg_size") "(" (sum-expr X C "")
-                            ")" (endl)])
-  [klvm-reg-> 0 X] C -> (s [(indent C) (id "reg") "[" (id "sp") "] = "
-                            (expr2 X C) (endl)])
-  [klvm-reg-> N X] C -> (s [(indent C) (id "reg") "[" (id "sp") " + " N "] = "
-                            (expr2 X C) (endl)])
-  [klvm-next-> X] C -> (s [(indent C) (id "next") " = " (expr-label X C)
-                           (endl)])
-  [klvm-inc-stack-ptr X] C -> (s [(indent C) (id' "sp") " += " (expr2 X C)
-                                  (endl) (indent C) "shen_sp = " (id' "sp")
-                                  (endl)])
-  [klvm-dec-stack-ptr X] C -> (s [(indent C) (id' "sp") " -= " (expr2 X C)
-                                  (endl) (indent C) "shen_sp = " (id' "sp")
-                                  (endl)])
+(define with-global
+  Var Value Thunk -> (let Prev (value Var)
+                       (unwind-protect (freeze (do (set Var Value)
+                                                   (thaw Thunk)))
+                         (freeze (set Var Prev)))))
 
-  [klvm-save-stack-ptr] C -> (s [(indent C) "spsv = " (id' "sp") (endl)])
-  [klvm-restore-stack-ptr] C -> (s [(indent C) (id' "sp") " = spsv" (endl)])
-  [klvm-nargs-> X] C -> (s [(indent C) (id "nargs") " = " (expr2 X C) (endl)])
-  [klvm-goto N] C -> (s [(indent C) "return " (func-name (label-sym N C))
-                         (endl)])
-  [klvm-call X] C -> (s [(indent C) "return " (id "fns")
-                         "[" (esc-obj (str X)) "]" (endl)])
-                     where (symbol? X)
-  [klvm-call X] C -> (s [(indent C) "return " (expr2 X C) (endl)])
-  [klvm-push-error-handler X] C -> (s [(indent C) (id "push_error_handler")
-                                        "(" (expr2 X C) ")" (endl)])
-  [klvm-pop-error-handler] C -> (s [(indent C) (id "pop_error_handler") "()"
-                                    (endl)])
-  [klvm-native X] C -> (s [(indent C) X (endl)])
-  [klvm-nargs-cond N X Y Z] C -> (nargs-cond N X Y Z C)
-  [klvm-if-nargs>0 R N X Y] C -> (nargs>0 R N X Y C)
-  [klvm-put-closure-args X] C -> (put-closure-args X C)
-  [klvm-if If Then Else] C -> (expr-if If Then Else C)
-  [klvm-closure-> X] C -> (expr-closure X C)
-  [klvm-wipe-stack X] C -> (expr-wipe-stack (expr2 X C) C)
-  X C -> (error "Broken KLVM in ~S (expr: ~S)" (context-func C) X))
+(define entry-tpl'
+  -> (let Klvm (klvm.entry-template [klvm.native "func"]
+                                    [klvm.native "func_nargs"]
+                                    [klvm.native "func_name"])
+          \\. (output "KLVM: ~S~%" Klvm)
+       C (mk-context
+          [klvm.native "name"] func_nargs 0 0 "" [entry])
+       (py 0 [["def fn_entry(func, func_nargs, func_name):"]
+              [--> | (func-prelude)]
+              [--> | (exprs [Klvm] C [])]
+              [--> ["return " (id "fail_obj")]]])))
 
-(define exprs
-  [] _ Acc -> Acc
-  [X | Y] C Acc -> (exprs Y C (cn Acc (expr1 X C))))
-
-(define func-prelude''
-  [] C Acc -> Acc
-  [X | Y] C Acc -> (let S (s [Acc (indent C) "shen_" X " = " (id' X) (endl)])
-                     (func-prelude'' Y C S)))
-
-(define func-prelude'
-  C -> (func-prelude'' ["reg" "fns" "globvars" "sp"] C ""))
-
-(define shen-func-globals
-  C -> (s [(indent C) "global nargs, sp, next" (endl)]))
-
-(define func-prelude
-  C -> (func-prelude' C) where (not (value *same-namespace*))
-  C -> (s [(shen-func-globals C) (func-prelude' C)]))
-
-(define func-hdr
-  Name C -> (let FN (func-name Name)
-              (s ["global " FN (endl) (indent C) "def " FN "():" (endl+ 1 C)
-                  (func-prelude C)])))
-
-(define label
-  N Code C -> (let R (func-hdr (label-sym N C) C)
-                   R (cn R (exprs Code C ""))
-                   . (indent-decr 1 C)
-                R))
-
-(define with-sns
-  Sns Thunk -> (let Prev (value *same-namespace*)
-                    . (set *same-namespace* Sns)
-                    R (trap-error (thaw Thunk)
-                                  (/. E (do (set *same-namespace* Prev)
-                                            (error (error-to-string E)))))
-                    . (set *same-namespace* Prev)
-                 R))
+(define return-tpl'
+  -> (let Klvm (klvm.return-template [klvm.native "retval"]
+                                     [klvm.native "retnext"])
+          \\. (output "KLVM: ~S~%" Klvm)
+       C (mk-context
+          [klvm.native "name"] func_nargs 0 0 "" [return])
+       (py 0 [["def fn_return(retval, retnext):"]
+              [--> | (func-prelude)]
+              [--> | (exprs [Klvm] C [])]])))
 
 (define entry-tpl
-  -> (with-sns
-      true
-      (freeze (let Klvm (klvm-func-entry-tpl [klvm-native "func"]
-                                             [klvm-native "func_nargs"])
-                   . (output "KLVM: ~S~%" Klvm)
-                   C (mk-context
-                      [klvm-native "name"] func_nargs 0 0 "" [entry])
-                (s ["def fn_entry(func, func_nargs, name):"
-                    (endl+ 1 C)
-                    (func-prelude C)
-                    (expr1 Klvm C)
-                    (indent C) "return fail_obj" (endl)])))))
+  Same-ns? -> (with-global same-namespace Same-ns? (freeze (entry-tpl'))))
 
 (define return-tpl
-  -> (with-sns
-      true
-      (freeze (let Klvm (klvm-func-return-tpl [klvm-native "ret"]
-                                              [klvm-native "retnext"])
-                   . (output "KLVM: ~S~%" Klvm)
-                   C (mk-context
-                      [klvm-native "name"] func_nargs 0 0 "" [return])
-                (s ["def fn_return(ret, retnext):"
-                    (endl+ 1 C)
-                    (func-prelude C)
-                    (expr1 Klvm C) (endl)])))))
+  Same-ns? -> (with-global same-namespace Same-ns? (freeze (return-tpl'))))
+
+(define func-entry
+  F Nargs Name C Acc -> (@ [["x = " (id "fn_entry") "(" (func-name F)
+                             ", " Nargs ", " (ensure-str F) ")"]
+                            ["if x != " (id "fail_obj") ": return x"]]
+                           Acc))
+
+(define func-return
+  X Next C Acc -> [["return " (id "fn_return") "(" X ", "
+                    (id "reg") "[" (id "sp") " + " Next "])"] | Acc])
+
+(define nargs-cond
+  Arity L E G C Acc -> (let P (expr2 Arity)
+                         (@ [["if " (id "nargs") " == " P ":"]
+                             [--> | (exprs E C [])]
+                             ["elif " (id "nargs") " < " P ":"]
+                             [--> | (exprs L C [])]
+                             ["else:"]
+                             [--> | (exprs G C [])]]
+                            Acc)))
+
+(define if-nargs>0
+  Then Else C Acc -> (@ [["if " (id "nargs") " > 0:"]
+                         [--> | (exprs Then C [])]
+                         ["else:"]
+                         [--> | (exprs Else C [])]]
+                        Acc))
+
+(define push-error-handler
+  X C Acc -> [[(id "push_error_handler") "(" (expr2 X) ")"] | Acc])
+
+(define put-closure-args
+  Off C Acc -> (@ [["a = closure[4]"]
+                   ["if len(a) > 0:"]
+                   [--> ["i = " Off]
+                        [(id "reg_size") "(i + len(a))"]
+                        ["for x in a:"]
+                        [--> [(id "reg") "[" (id "sp") " + i] = x"]
+                             ["i += 1"]]
+                        [(id "nargs") " = i"]]]
+                  Acc))
+
+(define next-val
+  X C -> (func-name (label-sym X C)) where (number? X)
+  X C -> (expr2 X))
+
+(define reg->
+  0 Y -> [(id "reg") "[" (id "sp") "] = " (expr2 Y)]
+  X Y -> [(id "reg") "[" (id "sp") " + " X "] = " (expr2 Y)])
+
+(define expr1
+  [klvm.entry F Nargs Name] C Acc -> (func-entry F Nargs Name C Acc)
+  [klvm.return X Next] C Acc -> (func-return (expr2 X) Next C Acc)
+  [klvm.goto L] C Acc -> [["return " (func-name (label-sym L C))] | Acc]
+  [klvm.goto-next] C Acc -> [["return " (id "next")] | Acc]
+  [klvm.call] C Acc -> [["return closure[2]"] | Acc]
+  [klvm.if If Then Else] C Acc -> (expr-if If Then Else C Acc)
+  [klvm.nargs-cond N L E G] C Acc -> (nargs-cond N L E G C Acc)
+  [klvm.if-nargs>0 Then Else] C Acc -> (if-nargs>0 Then Else C Acc)
+  [klvm.push-error-handler X] C Acc -> (push-error-handler X C Acc)
+  [klvm.pop-error-handler] _ Acc -> [[(id "pop_error_handler") "()"] | Acc]
+  [klvm.put-closure-args Off] C Acc -> (put-closure-args Off C Acc)
+  [klvm.ret-> X] C Acc -> [[(id "ret") " = " (expr2 X)] | Acc]
+  [klvm.nregs-> X] C Acc -> [[(id "reg_size") "(" (sum-expr2 X) ")"] | Acc]
+  [klvm.reg-> X Y] C Acc -> [(reg-> X Y) | Acc]
+  [klvm.next-> X] C Acc -> [[(id "next") " = " (next-val X C)] | Acc]
+  [klvm.sp+ X] C Acc -> (@ [[(id "sp") " += " (expr2 X)]
+                            [(id' "sp") " = " (id "sp")]]
+                           Acc)
+  [klvm.sp- X] C Acc -> (@ [[(id "sp") " -= " (expr2 X)]
+                            [(id' "sp") " = " (id "sp")]]
+                           Acc)
+  [klvm.nargs-> X] C Acc -> [[(id "nargs") " = " (expr2 X)] | Acc]
+  [klvm.nargs+ X] C Acc -> [[(id "nargs") " += " (expr2 X)] | Acc]
+  [klvm.nargs- X] C Acc -> [[(id "nargs") " -= " (expr2 X)] | Acc]
+  [klvm.closure-> X] C Acc -> [["closure = " (expr2 X)] | Acc]
+  [klvm.wipe-stack] C Acc -> [[(id "wipe_stack") "()"] | Acc]
+  X C _ -> (error "Broken KLVM in ~S (expr: ~S)" (context-func C) X))
+
+(define exprs
+  [] _ Acc -> (reverse Acc)
+  [X | Xs] C Acc -> (exprs Xs C (expr1 X C Acc)))
+
+(define func-prelude''
+  [] Acc -> (reverse Acc)
+  [X | Xs] Acc -> (func-prelude'' Xs [["shen_" X " = " (id' X)] | Acc]))
+
+(define func-prelude'
+  Acc -> (func-prelude'' ["reg" "fns" "globvars" "sp"] Acc))
+
+(define func-prelude
+  -> (func-prelude' []) where (not (value same-namespace))
+  -> (func-prelude' [["global nargs, sp, next, ret"]]))
+
+(define label
+  N Code C Acc -> (let FN (func-name (label-sym N C))
+                    (@ [["global " FN]
+                        ["def " FN "():"]
+                        [--> | (func-prelude)]
+                        [--> | (exprs Code C [])]]
+                       Acc)))
 
 (define labels
-  [] _ Acc -> Acc
-  [[[klvm-label N] | X] | Y] C Acc -> (let R (s [Acc (label N X C) (endl)])
-                                        (labels Y C R)))
+  [] _ Acc -> (reverse Acc)
+  [[N | L] | Ls] C Acc -> (labels Ls C (label N L C Acc)))
 
 (define mkfunc
-  Name Args Nregs Code -> (let Nargs (length Args)
-                               C (mk-context Name Nargs Nregs 0 ""
-                                             (value *inline*))
-                               R (labels Code C "")
-                               . (indent-decr 1 C)
-                            R))
+  Name Args Nregs [klvm.labels | Labels] ->
+  (let Nargs (length Args)
+       C (mk-context Name Nargs Nregs 0 "" (value inline))
+       R (labels Labels C [])
+    R))
 
 (define def-func'
-  Name Args -> (s [(indent 0) (id "defun_x") "(" (esc-obj (str Name)) ", "
-                   (length Args) ", " (func-name Name) ")" (endl) (endl)]))
+  Name Args -> (py 0 [[(id "defun_x") "(" (esc-obj (str Name)) ", "
+                       (length Args) ", " (func-name Name) ")"]
+                      []]))
 
 (define def-func
-  Name Args -> (def-func' Name Args) where (not (value *in-repl*))
-  Name Args -> (s [(indent 0) (id "ret") " = " (def-func' Name Args)]))
+  Name Args -> (def-func' Name Args) where (not (value in-repl))
+  Name Args -> (py 0 [[(id "ret") " = " (def-func' Name Args)]]))
 
 (define call-toplevel
-  Name -> (s [(indent 0) (id "nargs") " = 0" (endl) (indent 0)
-               (id "ret") " = " (func-name Name) "()" (endl)])
-          where (value *in-repl*)
-  Name -> (s [(indent 0) (id "call") "(" (func-name Name) ")" (endl)]))
+  Name -> (py 0 [[(id "nargs") " = 0"]
+                 [(id "next") " = " (func-name Name) "()"]])
+          where (value in-repl)
+  Name -> (py 0 [[(id "call") "(" (func-name Name) ")" (endl)]]))
 
 (define toplevel
-  Name _ Nregs Code -> (let X (mkfunc Name [] Nregs Code)
-                            F (func-name Name)
-                            TL (call-toplevel Name)
-                         (s [(indent 0) X TL "del " F (endl) (endl)])))
+  Name Args Nregs Code -> (let X (py 0 (mkfunc Name Args Nregs Code))
+                               F (func-name Name)
+                               TL (call-toplevel Name)
+                            (py 0 [X TL ["del " F] []])))
 
 (define py-from-kl-toplevel
   X <- (do (output "KL: ~S~%" X) (fail)) where false
-  X <- (do (klvm-show-code [X]) (fail)) where false
-  [klvm-closure Name Args Nregs Code] -> (mkfunc Name Args Nregs Code)
-  [klvm-func Name Args Nregs Code] -> (cn (mkfunc Name Args Nregs Code)
-                                          (def-func Name Args))
-  [klvm-toplevel Name Args Nregs Code] -> (toplevel Name Args Nregs Code)
-  [klvm-nargs-> [0]] -> (s [(id' "nargs") " = 0" (endl)])
-  [klvm-call X] -> (s [(indent 0) (id "call") "(" (func-name X) ")" (endl)
-                       (endl)])
-  _ -> "" where (not (value *in-repl*))
-  X -> (s [(id' "reg") "[" (id' "sp") "] = " (expr-obj X) (endl)
-           (id "ret") " = " (id "next") (endl)]))
+  X <- (do (klvm.dbg.show-code [X]) (fail)) where false
+  
+  [klvm.closure Name Args Nregs Code] ->
+  (let Fname (closure-name Name)
+    (cn (py 0 (mkfunc Name Args Nregs Code))
+        (py 0 [[]
+               [(esc-obj Fname) " = " (closure-obj Name (length Args))]
+               []])))
 
-(define py-from-kl-aux
+  [klvm.func Name Args Nregs Code] -> (cn (py 0 (mkfunc Name Args Nregs Code))
+                                          (def-func Name Args))
+  [klvm.toplevel Name Args Nregs Code] -> (toplevel Name Args Nregs Code))
+
+(define py-from-klvm
   [] Acc -> Acc
-  [X | Y] Acc -> (py-from-kl-aux Y (cn Acc (py-from-kl-toplevel X))))
+  [X | Y] Acc -> (py-from-klvm Y (cn Acc (py-from-kl-toplevel X))))
 
 (define py-from-kl
-  X -> (py-from-kl-aux (klvm-from-kl (function primitives) X) ""))
+  X -> (py-from-klvm (klvm.s2-from-kl (function primitives) X) ""))
 
 (define dump-to-file
   Code To -> (backend-utils.write-file
-              (s [(indent 0) "import shenpy" (endl)  Code (endl)]) To))
+              (s [(indent 0) "import shenpy" (endl) Code (endl)]) To))
 
 (define py-from-kl-expr
   X -> (py-from-kl [X]))
@@ -493,3 +449,10 @@
     (register-dumper python all py.dump)
     _)
 )
+
+
+\*
+
+
+
+*\

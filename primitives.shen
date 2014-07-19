@@ -1,4 +1,4 @@
-(package py [py-from-kl shenpy- klvm-runtime klvm-reg shenpy-eval]
+(package py [py-from-kl shenpy-eval klvm.native klvm.reg klvm.runtime]
 
 (set int-funcs [[[X] | [hd tl not string? number? symbol? cons?
                         vector? absvector? value intern vector
@@ -17,111 +17,100 @@
   3 [[[X Y Z] | A] | R] Acc -> (count-int-funcs-aux 3 R (+ Acc (length A)))
   N [[_ | A] | Rest] Acc -> (count-int-funcs-aux N Rest Acc))
 
-(define parg
-  F X -> (expr2 (F X) _))
-
 (define mkargs
-  F [X] Acc -> (cn Acc (parg F X))
-  F [X | Y] Acc -> (let Acc (s [Acc (parg F X) ", "])
-                     (mkargs F Y Acc)))
+  [X] Acc -> (cn Acc (expr2 X))
+  [X | Xs] Acc -> (mkargs Xs (s [Acc (expr2 X) ", "])))
 
 (define mkprim
-  F Name Args -> (s [(id Name) "(" (mkargs F Args "") ")"]))
+  Name Args -> (s [(id Name) "(" (mkargs Args "") ")"]))
 
-(define mkintern
-  _ "true" -> "True"
-  _ "false" -> "False"
-  _ X -> (s ["(" (id "type_symbol") ", " (esc-obj X) ")"])
-         where (string? X)
-  F X -> (mkprim F "intern" [X]))
+(define prim-intern
+  "true" -> "True"
+  "false" -> "False"
+  X -> (mkprim "intern" [X]))
 
-(define primitives-aux
-  _ [] -> "()"
+(define prim-value
+  X -> (s [(id "globvars") "[" (esc-obj (str X)) "]"]) where (symbol? X)
+  X -> (s [(id "globvars") "[" X "[1]]"]))
 
-  _ [= X X] -> "True"
-  _ [= X Y] -> "False" where (or (and (number? X) (number? Y))
-                                 (and (string? X) (string? Y)))
-  F [= X Y] -> (mkprim F "isequal" [X Y])
-  F [string? X] -> (make-string "isinstance(~A, str)" (parg F X))
-  F [number? X] -> (let X (parg F X)
-                     (s ["((isinstance(" X ", int) "
-                         "or isinstance(" X ", long) "
-                         "or isinstance(" X ", float)) "
-                         "and not isinstance(" X ", bool))"]))
-  F [symbol? X] -> (mkprim F "issymbol" [X])
-  F [cons? X] -> (mkprim F "iscons" [X])
-  F [vector? X] -> (mkprim F "isvector" [X])
-  F [absvector? X] -> (mkprim F "isabsvector" [X])
-  F [empty? X] -> (make-string "(~A == ())" (parg F X))
+(define prim-vector
+  X -> (s ["([" X "] + [" (id "fail_obj") "] * " X ")"]))
 
-  F [str X] -> (mkprim F "tostring" [X])
-  F [tlstr X] -> (make-string "~A[1:]" (parg F X))
-  F [n->string X] -> (make-string "chr(~A)" (parg F X))
-  F [string->n X] -> (make-string "ord(~A)" (parg F X))
+(define prim-tuple
+  X Y -> (s ["[" (id "fns") "['shen.tuple'], " X ", " Y "]"]))
 
-  F [not X] -> (make-string "(not ~A)" (parg F X))
-  F [intern X] -> (mkintern F X)
-  F [hd X] -> (make-string "~A[1]" (parg F X))
-  F [tl X] -> (make-string "~A[2]" (parg F X))
-  _ [value X] -> (s [(id "globvars") "[" (esc-obj (str X)) "]"])
-                 where (symbol? X)
-  F [value X] -> (s [(id "globvars") "[" (parg F X) "[1]]"])
-  F [set X Y] -> (mkprim F "setval" [X Y])
-  F [vector X] -> (let X (parg F X)
-                    (s ["([" X "] + [" (id "fail_obj") "] * " X ")"]))
-  F [absvector X] -> (s ["([" (id "fail_obj") "] * " (parg F X) ")"])
-  F [<-address V X] -> (make-string "~A[~A]" (parg F V) (parg F X))
-  F [address-> V I X] -> (mkprim F "absvector_set" [V I X])
+(define prim-number?
+  X -> (s ["(isinstance(" X ", (int, long, float))"
+           " and not isinstance(" X ", bool))"]))
 
-  F [read-byte X] -> (mkprim F "read_byte" [X])
-  F [write-byte X Y] -> (mkprim F "write_byte" [X Y])
-  F [close X] -> (s [(parg F X) ".close()"])
-
-  F [error X] -> (mkprim F "error" [X])
-  F [simple-error X] -> (mkprim F "error" [X])
-  F [error-to-string X] -> (mkprim F "error_to_string" [X])
-
-  F [cn X Y] -> (make-string "(~A + ~A)" (parg F X) (parg F Y))
-  F [pos X Y] -> (make-string "~A[~A]" (parg F X) (parg F Y))
-  F [@p X Y] -> (s ["[" (id "fns") "['shen.tuple'], " (parg F X) ", "
-                    (parg F Y) "]"])
-  F [cons X Y] -> (s ["(" (id "type_cons") ", " (parg F X) ", " (parg F Y)
-                      ")"])
-  F [/ X Y] -> (make-string "(1.0 * ~A / ~A)" (parg F X) (parg F Y))
-  F [Op X Y] -> (make-string "(~A ~A ~A)" (parg F X) Op (parg F Y))
-                where (element? Op [+ - * / > < >= <= and or])
-  F [pr X Y] -> (mkprim F "write_string" [X Y])
-  F [fail] -> (id "fail_obj")
-  _ _ -> (fail))
+(define primitives'
+  [] -> "()"
+  [= X Y] -> (mkprim "isequal" [X Y])
+  [string? X] -> (make-string "isinstance(~A, str)" (expr2 X))
+  [number? X] -> (prim-number? (expr2 X))
+  [symbol? X] -> (mkprim "issymbol" [X])
+  [cons? X] -> (mkprim "iscons" [X])
+  [vector? X] -> (mkprim "isvector" [X])
+  [absvector? X] -> (mkprim "isabsvector" [X])
+  [empty? X] -> (make-string "(~A == ())" (expr2 X))
+  [str X] -> (mkprim "tostring" [X])
+  [tlstr X] -> (make-string "~A[1:]" (expr2 X))
+  [n->string X] -> (mkprim "chr" [X])
+  [string->n X] -> (mkprim "ord" [X])
+  [not X] -> (make-string "(not ~A)" (expr2 X))
+  [intern X] -> (prim-intern X)
+  [hd X] -> (make-string "~A[1]" (expr2 X))
+  [tl X] -> (make-string "~A[2]" (expr2 X))
+  [value X] -> (prim-value (expr2 X))
+  [set X Y] -> (mkprim "setval" [X Y])
+  [vector X] -> (prim-vector (expr2 X))
+  [absvector X] -> (s ["([" (id "fail_obj") "] * " (expr2 X) ")"])
+  [<-address V X] -> (make-string "~A[~A]" (expr2 V) (expr2 X))
+  [address-> V I X] -> (mkprim "absvector_set" [V I X])
+  [read-byte X] -> (mkprim "read_byte" [X])
+  [write-byte X Y] -> (mkprim "write_byte" [X Y])
+  [close X] -> (s [(expr2 X) ".close()"])
+  [error X] -> (mkprim "error" [X])
+  [simple-error X] -> (mkprim "error" [X])
+  [error-to-string X] -> (mkprim "error_to_string" [X])
+  [cn X Y] -> (make-string "(~A + ~A)" (expr2 X) (expr2 Y))
+  [pos X Y] -> (make-string "~A[~A]" (expr2 X) (expr2 Y))
+  [@p X Y] -> (prim-tuple (expr2 X) (expr2 Y))
+  [cons X Y] -> (s ["(" (id "type_cons") ", " (expr2 X) ", " (expr2 Y) ")"])
+  [/ X Y] -> (make-string "(1.0 * ~A / ~A)" (expr2 X) (expr2 Y))
+  [Op X Y] -> (make-string "(~A ~A ~A)" (expr2 X) Op (expr2 Y))
+              where (element? Op [+ - * / > < >= <= and or])
+  [pr X Y] -> (mkprim "write_string" [X Y])
+  [fail] -> (id "fail_obj")
+  _ -> (fail))
 
 (define primitives
-  F X -> (let X' (primitives-aux F X)
-           (if (= X' (fail))
-               (fail)
-               [klvm-native X'])))
+  X -> (let X' (primitives' X)
+         (if (= X' (fail))
+             (fail)
+             [klvm.native X'])))
+
+(define primitives
+  X -> (primitives' X))
 
 (define gen-prim-args
   N N Acc -> (reverse Acc)
-  I N Acc -> (gen-prim-args (+ I 1) N [[klvm-reg I] | Acc]))
+  I N Acc -> (gen-prim-args (+ I 1) N [[klvm.reg I] | Acc]))
 
 (define generate-prim
   X Args -> (let Name (sym-py-from-shen (concat shenpy- X))
                  X' (esc-obj (str X))
-                 C (mk-context Name 0 0 0 "" (value *inline*))
-                 S (s ["def " Name "():" (endl+ 1 C)])
-                 S (s [S (indent C) "shen_reg = reg" (endl)])
-                 S (s [S (indent C) "shen_sp = sp" (endl)])
+                 C (mk-context Name 0 0 0 "" [])
                  Nargs (length Args)
-                 S (s [S (indent C) "x = fn_entry(" Name ", " Nargs ", " X'
-                         ")" (endl)
-                         (indent C) "if x != fail_obj: return x" (endl)])
                  Args' (gen-prim-args 0 Nargs [])
-                 Code (primitives-aux (/. X X) [X | Args'])
-                 S (s [S (indent C) "return fn_return(" Code ", "
-                       (id "next") ")" (endl) (endl)])
-                 . (indent-decr 1 C)
-              (s [S (id' "defun_x") "(" X' ", " Nargs ", " Name ")" (endl)
-                  (endl)])))
+                 Code (primitives' [X | Args'])
+              (py 0 [["def " Name "():"]
+                     [--> ["shen_reg = reg"]
+                          ["shen_sp = sp"]
+                          ["x = fn_entry(" Name ", " Nargs ", " X' ")"]
+                          ["if x != fail_obj: return x"]
+                          ["return fn_return(" Code ", " (id "next") ")"]]
+                     [(id' "defun_x") "(" X' ", " Nargs ", " Name ")"]])))
 
 (define generate-primitives-n
   _ [] Acc -> Acc
@@ -129,13 +118,14 @@
                            Acc (cn Acc S)
                         (generate-primitives-n Args R Acc)))
 
-(define generate-primitives-aux
+(define generate-primitives'
   [] Acc -> Acc
   [[Args | Prims] | R] Acc -> (let Acc (generate-primitives-n Args Prims Acc)
-                                (generate-primitives-aux R Acc)))
+                                (generate-primitives' R Acc)))
 
 (define generate-primitives
-  -> (let S (s [(entry-tpl) (endl) (return-tpl)])
-          S (generate-primitives-aux (value int-funcs) S)
-       (cn S (py-from-kl (klvm-runtime)))))
+  -> (let Same-ns true
+          S (s [(entry-tpl Same-ns) (endl) (return-tpl Same-ns)])
+          S (generate-primitives' (value int-funcs) S)
+       (cn S (py-from-kl (klvm.runtime)))))
 )
