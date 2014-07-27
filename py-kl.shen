@@ -12,7 +12,7 @@
              klvm.put-closure-args klvm.reg klvm.reg-> klvm.ret
              klvm.ret-> klvm.return klvm.s2.runtime klvm.sp+ klvm.sp-
              klvm.tailcall klvm.tailif klvm.thaw klvm.toplevel
-             klvm.wipe-stack
+             klvm.wipe
 
              backend-utils.map-shen
              backend-utils.translate-to-file
@@ -163,13 +163,17 @@
   X -> (esc-obj X) where (string? X)
   X -> (esc-obj (str X)) where (symbol? X))
 
-(define func-obj'
-  Func Nargs Name Fn -> (s ["(" (id "type_function") ", "
-                            (ensure-str Name) ", "
-                            (func-name Func) ", "
-                            (native Nargs) ", "
-                            "" (Fn "reg") "[" (Fn "sp") " : "
-                            (Fn "sp") " + " (Fn "nargs") "])"]))
+(define func-obj-name
+  [] -> "None"
+  Name -> (ensure-str Name))
+
+(define func-obj
+  Func Nargs Name -> (s ["(" (id "type_function") ", "
+                         (func-obj-name Name) ", "
+                         (func-name Func) ", "
+                         (native Nargs) ", "
+                         "" (id "reg") "[" (id "sp") " : "
+                         (id "sp") " + " (id "nargs") "])"]))
 
 (define closure-obj
   Func Nargs -> (s ["(" (id "type_function") ", None, " (func-name Func) ", "
@@ -177,9 +181,6 @@
 
 (define closure-name
   Name -> (intern (cn (str Name) "_obj")))
-
-(define func-obj
-  Func Nargs Name -> (func-obj' Func Nargs Name id))
 
 (define expr2
   [klvm.closure-nargs] -> "len(closure[4])"
@@ -264,7 +265,7 @@
 
 (define func-entry
   F Nargs Name C Acc -> (@ [["x = " (id "fn_entry") "(" (func-name F)
-                             ", " Nargs ", " (ensure-str F) ")"]
+                             ", " Nargs ", " (func-obj-name Name) ")"]
                             ["if x != " (id "fail_obj") ": return x"]]
                            Acc))
 
@@ -294,13 +295,12 @@
 
 (define put-closure-args
   Off C Acc -> (@ [["a = closure[4]"]
-                   ["if len(a) > 0:"]
-                   [--> ["i = " Off]
-                        [(id "reg_size") "(i + len(a))"]
-                        ["for x in a:"]
-                        [--> [(id "reg") "[" (id "sp") " + i] = x"]
-                             ["i += 1"]]
-                        [(id "nargs") " = i"]]]
+                   ["n = len(a)"]
+                   ["if n > 0:"]
+                   [--> ["i = " (id "sp") " + " Off]
+                        [(id "reg_size") "(" Off " + n)"]
+                        [(id "reg") "[i:i + n] = a"]
+                        [(id "nargs") " += n"]]]
                   Acc))
 
 (define next-val
@@ -310,6 +310,16 @@
 (define reg->
   0 Y -> [(id "reg") "[" (id "sp") "] = " (expr2 Y)]
   X Y -> [(id "reg") "[" (id "sp") " + " X "] = " (expr2 Y)])
+
+(define nregs->
+  [X] Acc -> (@ [[(id "reg_size") "(" X ")"]
+                 [(id "sp_top") " = " X]]
+                Acc)
+             where (number? X)
+  X Acc -> (@ [["n = " (sum-expr2 X)]
+               [(id "reg_size") "(n)"]
+               [(id "sp_top") " = n"]]
+              Acc))
 
 (define expr1
   [klvm.entry F Nargs Name] C Acc -> (func-entry F Nargs Name C Acc)
@@ -324,7 +334,7 @@
   [klvm.pop-error-handler] _ Acc -> [[(id "pop_error_handler") "()"] | Acc]
   [klvm.put-closure-args Off] C Acc -> (put-closure-args Off C Acc)
   [klvm.ret-> X] C Acc -> [[(id "ret") " = " (expr2 X)] | Acc]
-  [klvm.nregs-> X] C Acc -> [[(id "reg_size") "(" (sum-expr2 X) ")"] | Acc]
+  [klvm.nregs-> X] C Acc -> (nregs-> X Acc)
   [klvm.reg-> X Y] C Acc -> [(reg-> X Y) | Acc]
   [klvm.next-> X] C Acc -> [[(id "next") " = " (next-val X C)] | Acc]
   [klvm.sp+ X] C Acc -> (@ [[(id "sp") " += " (expr2 X)]
@@ -337,7 +347,7 @@
   [klvm.nargs+ X] C Acc -> [[(id "nargs") " += " (expr2 X)] | Acc]
   [klvm.nargs- X] C Acc -> [[(id "nargs") " -= " (expr2 X)] | Acc]
   [klvm.closure-> X] C Acc -> [["closure = " (expr2 X)] | Acc]
-  [klvm.wipe-stack] C Acc -> [[(id "wipe_stack") "()"] | Acc]
+  [klvm.wipe X] C Acc -> [[(id "wipe_stack") "(" (expr2 X) ")"] | Acc]
   X C _ -> (error "Broken KLVM in ~S (expr: ~S)" (context-func C) X))
 
 (define exprs
