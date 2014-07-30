@@ -6,13 +6,12 @@
               
              klvm.call klvm.closure klvm.closure-> klvm.closure-nargs
              klvm.entry klvm.func klvm.func-obj klvm.goto klvm.goto-next
-             klvm.if klvm.if-nargs>0 klvm.labels klvm.nargs klvm.nargs-
-             klvm.nargs-> klvm.nargs-cond klvm.next klvm.next->
-             klvm.nregs-> klvm.pop-error-handler klvm.push-error-handler
-             klvm.put-closure-args klvm.reg klvm.reg-> klvm.ret
-             klvm.ret-> klvm.return klvm.s2.runtime klvm.sp+ klvm.sp-
-             klvm.tailcall klvm.tailif klvm.thaw klvm.toplevel
-             klvm.wipe
+             klvm.if klvm.if-nargs>0 klvm.nargs klvm.nargs- klvm.nargs->
+             klvm.nargs-cond klvm.next klvm.next-> klvm.nregs->
+             klvm.pop-error-handler klvm.push-error-handler
+             klvm.put-closure-args klvm.reg klvm.reg-> klvm.ret klvm.ret->
+             klvm.return klvm.s2.runtime klvm.sp+ klvm.sp- klvm.tailcall
+             klvm.tailif klvm.thaw klvm.toplevel klvm.wipe
 
              backend-utils.map-shen
              backend-utils.translate-to-file
@@ -378,7 +377,7 @@
   [[N | L] | Ls] C Acc -> (labels Ls C (label N L C Acc)))
 
 (define mkfunc
-  Name Args Nregs [klvm.labels | Labels] ->
+  Name Args Nregs Labels ->
   (let Nargs (length Args)
        C (mk-context Name Nargs Nregs 0 "" (value inline))
        R (labels Labels C [])
