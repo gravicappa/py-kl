@@ -42,6 +42,15 @@
 (define s
   X -> (s' X ""))
 
+(define join'
+  [] _ Acc -> Acc
+  [X] _ Acc -> (s [Acc X])
+  [X | Xs] S Acc -> (join' Xs S (s [Acc X S])))
+
+(define join
+  [] _ -> ""
+  X S -> (join' X S ""))
+
 (define endl -> "c#10;")
 
 (define py-indent
@@ -353,12 +362,11 @@
   [] _ Acc -> (reverse Acc)
   [X | Xs] C Acc -> (exprs Xs C (expr1 X C Acc)))
 
-(define func-prelude''
-  [] Acc -> (reverse Acc)
-  [X | Xs] Acc -> (func-prelude'' Xs [["shen_" X " = " (id' X)] | Acc]))
-
 (define func-prelude'
-  X Acc -> (func-prelude'' ["reg" "fns" "globvars" | X] Acc))
+  X Acc -> (let X' ["reg" "fns" "globvars" | X]
+                L (join (map (/. X (s ["shen_" X])) X') ", ")
+                R (join (map id' X') ", ")
+             (append Acc [[L " = " R]])))
 
 (define func-prelude
   X -> (func-prelude' X []) where (not (value same-namespace))
