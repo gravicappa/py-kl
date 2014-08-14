@@ -7,7 +7,7 @@
              klvm.call klvm.closure klvm.closure-> klvm.closure-nargs
              klvm.entry klvm.func klvm.func-obj klvm.goto klvm.goto-next
              klvm.if klvm.if-nargs>0 klvm.nargs klvm.nargs- klvm.nargs->
-             klvm.nargs-cond klvm.next klvm.next-> klvm.nregs->
+             klvm.nargs+ klvm.nargs-cond klvm.next klvm.next-> klvm.nregs->
              klvm.pop-error-handler klvm.push-error-handler
              klvm.put-closure-args klvm.reg klvm.reg-> klvm.ret klvm.ret->
              klvm.return klvm.s2.runtime klvm.sp+ klvm.sp- klvm.tailcall
@@ -236,13 +236,12 @@
 
 (define entry-tpl'
   -> (let Klvm (klvm.entry-template [klvm.native "func"]
-                                    [klvm.native "func_nargs"]
+                                    [klvm.native "func_arity"]
                                     [klvm.native "func_name"])
           \\. (output "KLVM: ~S~%" Klvm)
-       C (mk-context
-          [klvm.native "name"] func_nargs 0 0 "" [entry])
-       (py 0 [["def fn_entry(func, func_nargs, func_name):"]
-              [--> | (func-prelude)]
+          C (mk-context [klvm.native "name"] func_arity 0 0 "" [entry])
+       (py 0 [["def fn_entry(func, func_arity, func_name):"]
+              [--> | (func-prelude ["sp"])]
               [--> | (exprs [Klvm] C [])]
               [--> ["return " (id "fail_obj")]]])))
 
@@ -253,7 +252,7 @@
        C (mk-context
           [klvm.native "name"] func_nargs 0 0 "" [return])
        (py 0 [["def fn_return(retval, retnext):"]
-              [--> | (func-prelude)]
+              [--> | (func-prelude ["sp"])]
               [--> | (exprs [Klvm] C [])]])))
 
 (define entry-tpl
@@ -265,7 +264,8 @@
 (define func-entry
   F Nargs Name C Acc -> (@ [["x = " (id "fn_entry") "(" (func-name F)
                              ", " Nargs ", " (func-obj-name Name) ")"]
-                            ["if x != " (id "fail_obj") ": return x"]]
+                            ["if x != " (id "fail_obj") ": return x"]
+                            [(id "sp") " = " (id' "sp")]]
                            Acc))
 
 (define func-return
@@ -293,13 +293,13 @@
   X C Acc -> [[(id "push_error_handler") "(" (expr2 X) ")"] | Acc])
 
 (define put-closure-args
-  Off C Acc -> (@ [["a = closure[4]"]
-                   ["n = len(a)"]
-                   ["if n > 0:"]
-                   [--> ["i = " (id "sp") " + " Off]
-                        [(id "reg_size") "(" Off " + n)"]
-                        [(id "reg") "[i:i + n] = a"]
-                        [(id "nargs") " += n"]]]
+  C Acc -> (@ [["a = closure[4]"]
+               ["n = len(a)"]
+               ["if n > 0:"]
+               [--> ["i = " (id "sp") " + " (id "nargs")]
+                    [(id "reg_size") "(" (id "nargs") " + n)"]
+                    [(id "reg") "[i:i + n] = a"]
+                    [(id "nargs") " += n"]]]
                   Acc))
 
 (define next-val
@@ -331,7 +331,7 @@
   [klvm.if-nargs>0 Then Else] C Acc -> (if-nargs>0 Then Else C Acc)
   [klvm.push-error-handler X] C Acc -> (push-error-handler X C Acc)
   [klvm.pop-error-handler] _ Acc -> [[(id "pop_error_handler") "()"] | Acc]
-  [klvm.put-closure-args Off] C Acc -> (put-closure-args Off C Acc)
+  [klvm.put-closure-args] C Acc -> (put-closure-args C Acc)
   [klvm.ret-> X] C Acc -> [[(id "ret") " = " (expr2 X)] | Acc]
   [klvm.nregs-> X] C Acc -> (nregs-> X Acc)
   [klvm.reg-> X Y] C Acc -> [(reg-> X Y) | Acc]
@@ -358,17 +358,21 @@
   [X | Xs] Acc -> (func-prelude'' Xs [["shen_" X " = " (id' X)] | Acc]))
 
 (define func-prelude'
-  Acc -> (func-prelude'' ["reg" "fns" "globvars" "sp"] Acc))
+  X Acc -> (func-prelude'' ["reg" "fns" "globvars" | X] Acc))
 
 (define func-prelude
-  -> (func-prelude' []) where (not (value same-namespace))
-  -> (func-prelude' [["global nargs, sp, next, ret"]]))
+  X -> (func-prelude' X []) where (not (value same-namespace))
+  X -> (func-prelude' X [["global nargs, sp, next, ret"]]))
+
+(define label-prelude
+  0 -> (func-prelude [])
+  _ -> (func-prelude ["sp"]))
 
 (define label
   N Code C Acc -> (let FN (func-name (label-sym N C))
                     (@ [["global " FN]
                         ["def " FN "():"]
-                        [--> | (func-prelude)]
+                        [--> | (label-prelude N)]
                         [--> | (exprs Code C [])]]
                        Acc)))
 
